@@ -19,10 +19,22 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U discordia"]
+      test: ["CMD-SHELL", "pg_isready -d discordia_servicio -U discordia"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  migrations:
+    image: migrate/migrate
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://discordia:discordia@db:5432/discordia_servicio?sslmode=disable
+      - up
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   db_data:
