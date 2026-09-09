@@ -16,10 +16,11 @@ import (
 )
 
 type authServiceStub struct {
-	response *model.AuthResponse
-	err      error
-	request  model.RegisterRequest
-	called   bool
+	response     *model.AuthResponse
+	err          error
+	request      model.RegisterRequest
+	loginRequest model.LoginRequest
+	called       bool
 }
 
 var _ service.AuthService = (*authServiceStub)(nil)
@@ -27,6 +28,12 @@ var _ service.AuthService = (*authServiceStub)(nil)
 func (s *authServiceStub) Register(_ context.Context, request model.RegisterRequest) (*model.AuthResponse, error) {
 	s.called = true
 	s.request = request
+	return s.response, s.err
+}
+
+func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (*model.AuthResponse, error) {
+	s.called = true
+	s.loginRequest = request
 	return s.response, s.err
 }
 
@@ -121,6 +128,71 @@ func TestAuthHandlerRegisterMapsBusinessErrors(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLoginReturnsToken(t *testing.T) {
+	serviceStub := &authServiceStub{response: &model.AuthResponse{Token: "signed-token"}}
+	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Secure123"}`)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.called || serviceStub.loginRequest.Email != "ada@example.com" {
+		t.Fatalf("service received unexpected login request: %+v", serviceStub.loginRequest)
+	}
+}
+
+func TestAuthHandlerLoginUsesSameErrorForUnknownEmailAndWrongPassword(t *testing.T) {
+	for _, test := range []string{"unknown email", "wrong password"} {
+		t.Run(test, func(t *testing.T) {
+			serviceStub := &authServiceStub{err: service.ErrInvalidCredentials}
+			recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Wrong123"}`)
+
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+			}
+			var response model.ErrorResponse
+			decodeJSON(t, recorder, &response)
+			if response.Error.Code != "INVALID_CREDENTIALS" {
+				t.Fatalf("error code = %q, want INVALID_CREDENTIALS", response.Error.Code)
+			}
+		})
+	}
+}
+
+func TestAuthHandlerLoginRejectsInvalidEmailBeforeCallingService(t *testing.T) {
+	serviceStub := &authServiceStub{}
+	recorder := performLoginRequest(t, serviceStub, `{"email":"not-an-email","password":"Secure123"}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if serviceStub.called {
+		t.Fatal("service must not be called for an invalid email")
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INVALID_INPUT" {
+		t.Fatalf("error code = %q, want INVALID_INPUT", response.Error.Code)
+	}
+}
+
+func TestAuthHandlerLoginRejectsMissingRequiredFields(t *testing.T) {
+	serviceStub := &authServiceStub{}
+	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com"}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if serviceStub.called {
+		t.Fatal("service must not be called for missing required fields")
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INVALID_INPUT" {
+		t.Fatalf("error code = %q, want INVALID_INPUT", response.Error.Code)
+	}
+}
+
+
 func performRegisterRequest(t *testing.T, authService service.AuthService, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -130,6 +202,19 @@ func performRegisterRequest(t *testing.T, authService service.AuthService, body 
 
 	router := gin.New()
 	router.POST("/v1/users", NewAuthHandler(authService).Register)
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performLoginRequest(t *testing.T, authService service.AuthService, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/login", jsonBody(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	router := gin.New()
+	router.POST("/v1/login", NewAuthHandler(authService).Login)
 	router.ServeHTTP(recorder, request)
 	return recorder
 }

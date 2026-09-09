@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	ErrPasswordInsecure = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
-	ErrEmailInUse       = errors.New("el correo electrónico ya está registrado")
+	ErrPasswordInsecure   = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
+	ErrEmailInUse         = errors.New("el correo electrónico ya está registrado")
+	ErrInvalidCredentials = errors.New("correo electrónico o contraseña inválidos")
 )
 
 type AuthService interface {
 	Register(ctx context.Context, req model.RegisterRequest) (*model.AuthResponse, error)
+	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
 }
 
 type authService struct {
@@ -73,6 +75,31 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 			Name:      user.Name,
 			Email:     user.Email,
 			CreatedAt: createdAtUTC,
+		},
+		Token: token,
+	}, nil
+}
+
+func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error) {
+	user, err := s.repo.GetByEmail(ctx, req.Email)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	token, err := generateJWT(user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		User: model.UserResponse{
+			ID:        user.ID,
+			Name:      user.Name,
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt.UTC(),
 		},
 		Token: token,
 	}, nil

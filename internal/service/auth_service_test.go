@@ -153,3 +153,78 @@ func TestAuthServiceRegisterPropagatesRepositoryErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:           42,
+		Name:         "Ada Lovelace",
+		Email:        "ada@example.com",
+		PasswordHash: string(passwordHash),
+		CreatedAt:    time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
+	}}
+
+	response, err := NewAuthService(repo).Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+	})
+
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if response == nil || response.Token == "" || response.User.ID != 42 {
+		t.Fatalf("unexpected login response: %+v", response)
+	}
+}
+
+func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		user *model.User
+	}{
+		{name: "unknown email", user: nil},
+		{name: "wrong password", user: &model.User{PasswordHash: string(passwordHash)}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &userRepositoryStub{existingUser: test.user}
+			response, loginErr := NewAuthService(repo).Login(context.Background(), model.LoginRequest{
+				Email:    "ada@example.com",
+				Password: "Wrong123",
+			})
+
+			if !errors.Is(loginErr, ErrInvalidCredentials) {
+				t.Fatalf("Login() error = %v, want ErrInvalidCredentials", loginErr)
+			}
+			if response != nil {
+				t.Fatalf("Login() response = %+v, want nil", response)
+			}
+		})
+	}
+}
+
+func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
+	repositoryErr := errors.New("database unavailable")
+	repo := &userRepositoryStub{getErr: repositoryErr}
+	service := NewAuthService(repo)
+	
+	_, err := service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+	})
+
+	if !errors.Is(err, repositoryErr) {
+		t.Fatalf("Login() error = %v, want repository error", err)
+	}
+}
+
