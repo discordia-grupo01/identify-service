@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,8 @@ type authServiceStub struct {
 	request      model.RegisterRequest
 	loginRequest model.LoginRequest
 	called       bool
+	logoutCalled bool
+	logoutToken  string
 }
 
 var _ service.AuthService = (*authServiceStub)(nil)
@@ -35,6 +38,12 @@ func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (
 	s.called = true
 	s.loginRequest = request
 	return s.response, s.err
+}
+
+func (s *authServiceStub) Logout(_ context.Context, tokenID string) error {
+	s.logoutCalled = true
+	s.logoutToken = tokenID
+	return s.err
 }
 
 func TestAuthHandlerRegisterReturnsCreatedUser(t *testing.T) {
@@ -192,6 +201,65 @@ func TestAuthHandlerLoginRejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLogoutRevokesCurrentSession(t *testing.T) {
+	serviceStub := &authServiceStub{}
+	recorder := performLogoutRequest(t, serviceStub, "session-token")
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if !serviceStub.logoutCalled {
+		t.Fatal("service Logout() was not called")
+	}
+	if serviceStub.logoutToken != "session-token" {
+		t.Fatalf("Logout() token = %q, want session-token", serviceStub.logoutToken)
+	}
+}
+
+func TestAuthHandlerLogoutRejectsMissingSessionContext(t *testing.T) {
+	serviceStub := &authServiceStub{}
+	recorder := performLogoutRequest(t, serviceStub, "")
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "UNAUTHORIZED" {
+		t.Fatalf("error code = %q, want UNAUTHORIZED", response.Error.Code)
+	}
+	if serviceStub.logoutCalled {
+		t.Fatal("service Logout() must not be called without a session")
+	}
+}
+
+func TestAuthHandlerLogoutMapsExpiredOrRevokedSession(t *testing.T) {
+	serviceStub := &authServiceStub{err: service.ErrInexistentSession}
+	recorder := performLogoutRequest(t, serviceStub, "expired-token")
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "SESSION_EXPIRED" {
+		t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
+	}
+}
+
+func TestAuthHandlerLogoutMapsUnexpectedServiceError(t *testing.T) {
+	serviceStub := &authServiceStub{err: errors.New("database unavailable")}
+	recorder := performLogoutRequest(t, serviceStub, "session-token")
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INTERNAL_SERVER_ERROR" {
+		t.Fatalf("error code = %q, want INTERNAL_SERVER_ERROR", response.Error.Code)
+	}
+}
 
 func performRegisterRequest(t *testing.T, authService service.AuthService, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -215,6 +283,23 @@ func performLoginRequest(t *testing.T, authService service.AuthService, body str
 
 	router := gin.New()
 	router.POST("/v1/login", NewAuthHandler(authService).Login)
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performLogoutRequest(t *testing.T, authService service.AuthService, tokenID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/logout", nil)
+
+	router := gin.New()
+	router.POST("/v1/logout", func(c *gin.Context) {
+		if tokenID != "" {
+			c.Set(middleware.TokenIDKey, tokenID)
+		}
+		NewAuthHandler(authService).Logout(c)
+	})
 	router.ServeHTTP(recorder, request)
 	return recorder
 }

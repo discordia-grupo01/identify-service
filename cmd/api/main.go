@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/handler"
+	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 
@@ -37,7 +38,8 @@ func main() {
 	router := gin.Default()
 
 	userRepo := repository.NewUserRepository(dbConnection)
-	authService := service.NewAuthService(userRepo)
+	sessionRepo := repository.NewSessionRepository(dbConnection)
+	authService := service.NewAuthService(userRepo, sessionRepo)
 	authHandler := handler.NewAuthHandler(authService)
 
 	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
@@ -70,6 +72,7 @@ func main() {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
+		api.POST("/logout", middleware.RequireAuth(sessionRepo), authHandler.Logout)
 	}
 
 	addr := host + ":" + port

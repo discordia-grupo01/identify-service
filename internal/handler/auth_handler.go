@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 
@@ -108,4 +109,32 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, res)
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	tokenID, exists := c.Get(middleware.TokenIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+			Code:    "UNAUTHORIZED",
+			Message: "La sesión no es válida",
+		}})
+		return
+	}
+
+	if err := h.service.Logout(c.Request.Context(), tokenID.(string)); err != nil {
+		if err == service.ErrInexistentSession {
+			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+				Code:    "SESSION_EXPIRED",
+				Message: "La sesión expiró o ya no es válida",
+			}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
+			Code:    "INTERNAL_SERVER_ERROR",
+			Message: "Ha ocurrido un error inesperado en el servidor",
+		}})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
