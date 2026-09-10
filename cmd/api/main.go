@@ -11,6 +11,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
+	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -39,8 +40,19 @@ func main() {
 
 	userRepo := repository.NewUserRepository(dbConnection)
 	sessionRepo := repository.NewSessionRepository(dbConnection)
+	passwordRecoveryRepo := repository.NewPostgresPasswordRecoveryRepository(dbConnection)
 	authService := service.NewAuthService(userRepo, sessionRepo)
 	authHandler := handler.NewAuthHandler(authService)
+	emailConfig, err := emailutil.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("invalid email configuration: %v", err)
+	}
+	emailService, err := emailutil.NewSMTPService(emailConfig)
+	if err != nil {
+		log.Fatalf("invalid email configuration: %v", err)
+	}
+	passwordRecoveryService := service.NewPasswordRecoveryService(passwordRecoveryRepo, userRepo, emailService)
+	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
 
 	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
 	router.GET("/livez", func(c *gin.Context) {
@@ -73,6 +85,8 @@ func main() {
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
 		api.POST("/logout", middleware.RequireAuth(sessionRepo), authHandler.Logout)
+		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
+		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 	}
 
 	addr := host + ":" + port
