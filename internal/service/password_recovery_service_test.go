@@ -14,13 +14,16 @@ import (
 )
 
 type passwordRecoveryRepositoryStub struct {
-	count     int
-	countErr  error
-	createErr error
-	resetErr  error
-	created   *model.PasswordRecovery
-	resetHash string
-	newHash   string
+	count      int
+	countErr   error
+	createErr  error
+	resetErr   error
+	created    *model.PasswordRecovery
+	resetHash  string
+	newHash    string
+	resetCalls int
+	countEmail string
+	countSince time.Time
 }
 
 func (r *passwordRecoveryRepositoryStub) Create(_ context.Context, recovery *model.PasswordRecovery) error {
@@ -31,11 +34,14 @@ func (r *passwordRecoveryRepositoryStub) Create(_ context.Context, recovery *mod
 	return nil
 }
 
-func (r *passwordRecoveryRepositoryStub) CountRecentByEmail(_ context.Context, _ string, _ time.Time) (int, error) {
+func (r *passwordRecoveryRepositoryStub) CountRecentByEmail(_ context.Context, email string, since time.Time) (int, error) {
+	r.countEmail = email
+	r.countSince = since
 	return r.count, r.countErr
 }
 
 func (r *passwordRecoveryRepositoryStub) ResetPassword(_ context.Context, tokenHash string, passwordHash string) error {
+	r.resetCalls++
 	r.resetHash = tokenHash
 	r.newHash = passwordHash
 	return r.resetErr
@@ -86,6 +92,9 @@ func TestRecoverPasswordCreatesSingleUseExpiringTokenAndSendsEmail(t *testing.T)
 	if !strings.Contains(mailer.request.ResetURL, "token=") {
 		t.Fatalf("reset URL does not contain token: %s", mailer.request.ResetURL)
 	}
+	if repo.countEmail != "ada@example.com" || !repo.countSince.Equal(service.clock().Add(-time.Hour)) {
+		t.Fatalf("unexpected rate-limit query: email=%q since=%v", repo.countEmail, repo.countSince)
+	}
 }
 
 func TestRecoverPasswordDoesNotRevealUnknownEmail(t *testing.T) {
@@ -116,6 +125,78 @@ func TestRecoverPasswordLimitsRecentRequests(t *testing.T) {
 	}
 }
 
+func TestRecoverPasswordPropagatesCountErrorWithoutSideEffects(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{countErr: errors.New("database unavailable")}
+	users := &userRepositoryStub{existingUser: &model.User{Email: "ada@example.com"}}
+	mailer := &passwordRecoveryMailerStub{}
+	service := newPasswordRecoveryTestService(repo, users, mailer)
+
+	err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{Email: "ada@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "count password recovery requests") {
+		t.Fatalf("error = %v, want wrapped count error", err)
+	}
+	if repo.created != nil || mailer.called {
+		t.Fatal("count failure must not create a token or send an email")
+	}
+}
+
+func TestRecoverPasswordPropagatesUserLookupError(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	users := &userRepositoryStub{getErr: errors.New("database unavailable")}
+	service := newPasswordRecoveryTestService(repo, users, &passwordRecoveryMailerStub{})
+
+	err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{Email: "ada@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "find user by email") {
+		t.Fatalf("error = %v, want wrapped user lookup error", err)
+	}
+}
+
+func TestRecoverPasswordPropagatesCreateErrorWithoutSendingEmail(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{createErr: errors.New("insert failed")}
+	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	mailer := &passwordRecoveryMailerStub{}
+	service := newPasswordRecoveryTestService(repo, users, mailer)
+
+	err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{Email: "ada@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "create password recovery request") {
+		t.Fatalf("error = %v, want wrapped create error", err)
+	}
+	if mailer.called {
+		t.Fatal("create failure must not send an email")
+	}
+}
+
+func TestRecoverPasswordPropagatesMailerError(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	mailer := &passwordRecoveryMailerStub{err: errors.New("SMTP unavailable")}
+	service := newPasswordRecoveryTestService(repo, users, mailer)
+
+	err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{Email: "ada@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "send password reset email") {
+		t.Fatalf("error = %v, want wrapped mailer error", err)
+	}
+	if repo.created == nil {
+		t.Fatal("token should be persisted before sending the email")
+	}
+}
+
+func TestRecoverPasswordRejectsInvalidResetBaseURL(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	mailer := &passwordRecoveryMailerStub{}
+	service := newPasswordRecoveryTestService(repo, users, mailer)
+	service.resetBaseURL = "://invalid"
+
+	err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{Email: "ada@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "build password reset URL") {
+		t.Fatalf("error = %v, want invalid URL error", err)
+	}
+	if mailer.called {
+		t.Fatal("invalid URL must not send an email")
+	}
+}
+
 func TestResetPasswordUpdatesPasswordAndHashesSubmittedToken(t *testing.T) {
 	repo := &passwordRecoveryRepositoryStub{}
 	service := newPasswordRecoveryTestService(repo, &userRepositoryStub{}, &passwordRecoveryMailerStub{})
@@ -138,5 +219,92 @@ func TestResetPasswordRejectsExpiredOrUsedToken(t *testing.T) {
 	err := service.ResetPassword(context.Background(), model.PasswordResetRequest{Token: "expired", NewPassword: "NewSecure123", ConfirmPassword: "NewSecure123"})
 	if !errors.Is(err, ErrInvalidResetToken) {
 		t.Fatalf("ResetPassword() error = %v, want ErrInvalidResetToken", err)
+	}
+}
+
+func TestResetPasswordRejectsMismatchedPasswordsBeforeRepository(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	service := newPasswordRecoveryTestService(repo, &userRepositoryStub{}, &passwordRecoveryMailerStub{})
+
+	err := service.ResetPassword(context.Background(), model.PasswordResetRequest{
+		Token:           "token",
+		NewPassword:     "NewSecure123",
+		ConfirmPassword: "OtherSecure123",
+	})
+	if !errors.Is(err, ErrPasswordsDoNotMatch) {
+		t.Fatalf("error = %v, want ErrPasswordsDoNotMatch", err)
+	}
+	if repo.resetCalls != 0 {
+		t.Fatal("repository must not be called when passwords do not match")
+	}
+}
+
+func TestResetPasswordRejectsInsecurePasswordBeforeRepository(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	service := newPasswordRecoveryTestService(repo, &userRepositoryStub{}, &passwordRecoveryMailerStub{})
+
+	err := service.ResetPassword(context.Background(), model.PasswordResetRequest{
+		Token:           "token",
+		NewPassword:     "weak",
+		ConfirmPassword: "weak",
+	})
+	if !errors.Is(err, ErrPasswordInsecure) {
+		t.Fatalf("error = %v, want ErrPasswordInsecure", err)
+	}
+	if repo.resetCalls != 0 {
+		t.Fatal("repository must not be called for an insecure password")
+	}
+}
+
+func TestResetPasswordRejectsEmptyTokenBeforeHashing(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{}
+	service := newPasswordRecoveryTestService(repo, &userRepositoryStub{}, &passwordRecoveryMailerStub{})
+
+	err := service.ResetPassword(context.Background(), model.PasswordResetRequest{
+		NewPassword:     "NewSecure123",
+		ConfirmPassword: "NewSecure123",
+	})
+	if !errors.Is(err, ErrInvalidResetToken) {
+		t.Fatalf("error = %v, want ErrInvalidResetToken", err)
+	}
+	if repo.resetCalls != 0 {
+		t.Fatal("repository must not be called for an empty token")
+	}
+}
+
+func TestResetPasswordWrapsUnexpectedRepositoryError(t *testing.T) {
+	repo := &passwordRecoveryRepositoryStub{resetErr: errors.New("database unavailable")}
+	service := newPasswordRecoveryTestService(repo, &userRepositoryStub{}, &passwordRecoveryMailerStub{})
+
+	err := service.ResetPassword(context.Background(), model.PasswordResetRequest{
+		Token:           "token",
+		NewPassword:     "NewSecure123",
+		ConfirmPassword: "NewSecure123",
+	})
+	if err == nil || !strings.Contains(err.Error(), "reset password") {
+		t.Fatalf("error = %v, want wrapped repository error", err)
+	}
+}
+
+func TestGenerateResetTokenIsRandomAndHashIsStable(t *testing.T) {
+	first, err := GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken() error = %v", err)
+	}
+	second, err := GenerateResetToken()
+	if err != nil {
+		t.Fatalf("GenerateResetToken() second error = %v", err)
+	}
+	if len(first) != 64 || len(second) != 64 {
+		t.Fatalf("token lengths = %d and %d, want 64", len(first), len(second))
+	}
+	if first == second {
+		t.Fatal("two generated reset tokens must not be equal")
+	}
+	if HashResetToken(first) != HashResetToken(first) {
+		t.Fatal("hashing the same token must be stable")
+	}
+	if HashResetToken(first) == HashResetToken(second) {
+		t.Fatal("different tokens must not have the same hash")
 	}
 }
