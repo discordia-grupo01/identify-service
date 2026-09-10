@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
@@ -25,6 +26,7 @@ var (
 
 const (
 	HOURS_TO_EXPIRE = 72
+	jwtIssuer       = "discordia-issuer"
 )
 
 type AuthService interface {
@@ -160,7 +162,8 @@ func generateJWT(userID int64) (string, string, time.Time, error) {
 	}
 	expiresAt := time.Now().Add(HOURS_TO_EXPIRE * time.Hour)
 	claims := jwt.MapClaims{
-		"sub": userID,
+		"iss": jwtIssuer,
+		"sub": strconv.FormatInt(userID, 10),
 		"jti": tokenID,
 		"exp": expiresAt.Unix(),
 	}
