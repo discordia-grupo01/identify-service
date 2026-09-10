@@ -4,12 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
 	"github.com/discordia-grupo01/identify-service/internal/model"
 )
 
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
+}
+
+func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID int64, passwordHash string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2`, passwordHash, userID)
+	return err
 }
 
 type postgresUserRepository struct {

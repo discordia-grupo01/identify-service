@@ -22,6 +22,12 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type PasswordResetRequest struct {
+	Token           string `json:"token" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+	ConfirmPassword string `json:"confirm_password" binding:"required"`
+}
+
 type AuthResponse struct {
 	User  UserResponse `json:"user"`
 	Token string       `json:"token"`
