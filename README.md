@@ -28,6 +28,16 @@ make run
 | DATABASE_PASSWORD | - | Password de conexion. En local, coincide con `POSTGRES_PASSWORD` de docker-compose.yml. |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | RABBITMQ_URL | - | URL de conexion a RabbitMQ. |
+| SMTP_HOST | - | Host del servidor SMTP. |
+| SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
+| SMTP_USERNAME | - | Usuario SMTP. |
+| SMTP_PASSWORD | - | Password SMTP. |
+| SMTP_FROM | - | Direccion remitente. |
+| SMTP_REPLY_TO | - | Direccion opcional de respuesta. |
+| APP_NAME | Discordia | Nombre mostrado en el email. |
+| PASSWORD_RESET_URL | http://localhost:3000/reset-password | URL base del frontend para recuperar la contraseña. |
+| PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
+| PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
