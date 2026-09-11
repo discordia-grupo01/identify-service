@@ -7,13 +7,13 @@ import (
 	"errors"
 	"os"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -68,6 +68,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	}
 
 	user := &model.User{
+		ID:           uuid.NewString(),
 		Name:         req.Name,
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
@@ -154,7 +155,7 @@ func validatePassword(password string) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
-func generateJWT(userID int64) (string, string, time.Time, error) {
+func generateJWT(userID string) (string, string, time.Time, error) {
 	secret := os.Getenv("JWT_SECRET")
 	tokenID, err := newTokenID()
 	if err != nil {
@@ -163,7 +164,7 @@ func generateJWT(userID int64) (string, string, time.Time, error) {
 	expiresAt := time.Now().Add(HOURS_TO_EXPIRE * time.Hour)
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
-		"sub": strconv.FormatInt(userID, 10),
+		"sub": userID,
 		"jti": tokenID,
 		"exp": expiresAt.Unix(),
 	}

@@ -10,7 +10,7 @@ import (
 var ErrSessionNotFound = errors.New("session not found")
 
 type SessionRepository interface {
-	Create(ctx context.Context, tokenID string, userID int64, expiresAt time.Time) error
+	Create(ctx context.Context, tokenID string, userID string, expiresAt time.Time) error
 	IsActive(ctx context.Context, tokenID string) (bool, error)
 	Revoke(ctx context.Context, tokenID string) error
 }
@@ -23,7 +23,7 @@ func NewSessionRepository(db *sql.DB) SessionRepository {
 	return &postgresSessionRepository{db: db}
 }
 
-func (r *postgresSessionRepository) Create(ctx context.Context, tokenID string, userID int64, expiresAt time.Time) error {
+func (r *postgresSessionRepository) Create(ctx context.Context, tokenID string, userID string, expiresAt time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO sessions (token_id, user_id, expires_at)
 		VALUES ($1, $2, $3)`, tokenID, userID, expiresAt)

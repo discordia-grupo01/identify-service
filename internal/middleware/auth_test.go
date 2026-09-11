@@ -19,7 +19,7 @@ type sessionRepositoryStub struct {
 	err    error
 }
 
-func (r *sessionRepositoryStub) Create(_ context.Context, tokenID string, _ int64, _ time.Time) error {
+func (r *sessionRepositoryStub) Create(_ context.Context, tokenID string, _ string, _ time.Time) error {
 	if r.active == nil {
 		r.active = make(map[string]bool)
 	}
@@ -148,7 +148,7 @@ func TestRequireAuthRejectsMalformedTokens(t *testing.T) {
 
 func TestRequireAuthRejectsMissingAuthorizationHeader(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
-	
+
 	request := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
 	recorder := httptest.NewRecorder()
 
@@ -184,7 +184,7 @@ func TestRequireAuthRejectsInvalidSignature(t *testing.T) {
 func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, jwt.MapClaims{
-		"sub": int64(42),
+		"sub": "550e8400-e29b-41d4-a716-446655440000",
 		"jti": "wrong-method-token",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
@@ -192,7 +192,7 @@ func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignedString() error: %v", err)
 	}
-	
+
 	request := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
 	request.Header.Set("Authorization", "Bearer "+signed)
 	recorder := httptest.NewRecorder()
@@ -211,7 +211,7 @@ func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 func signedToken(t *testing.T, tokenID string, expiresAt time.Time) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": int64(42),
+		"sub": "550e8400-e29b-41d4-a716-446655440000",
 		"jti": tokenID,
 		"exp": expiresAt.Unix(),
 	})

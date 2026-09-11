@@ -160,7 +160,7 @@ components:
       type: object
       required: [id, name, email, created_at]
       properties:
-        id: { type: integer, format: int64 }
+        id: { type: string, format: uuid }
         name: { type: string }
         email: { type: string, format: email }
         created_at: { type: string, format: date-time }

@@ -3,7 +3,6 @@ package middleware
 import (
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
@@ -42,8 +41,8 @@ func RequireAuth(sessionRepo repository.SessionRepository) gin.HandlerFunc {
 			unauthorized(c)
 			return
 		}
-		userID, err := claimInt64(claims["sub"])
-		if err != nil {
+		userID, ok := claims["sub"].(string)
+		if !ok || userID == "" {
 			unauthorized(c)
 			return
 		}
@@ -57,17 +56,6 @@ func RequireAuth(sessionRepo repository.SessionRepository) gin.HandlerFunc {
 		c.Set(UserIDKey, userID)
 		c.Set(TokenIDKey, tokenID)
 		c.Next()
-	}
-}
-
-func claimInt64(value any) (int64, error) {
-	switch number := value.(type) {
-	case float64:
-		return int64(number), nil
-	case string:
-		return strconv.ParseInt(number, 10, 64)
-	default:
-		return 0, strconv.ErrSyntax
 	}
 }
 

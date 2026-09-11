@@ -50,7 +50,7 @@ func TestAuthHandlerRegisterReturnsCreatedUser(t *testing.T) {
 	serviceStub := &authServiceStub{
 		response: &model.AuthResponse{
 			User: model.UserResponse{
-				ID:        42,
+				ID:        "550e8400-e29b-41d4-a716-446655440000",
 				Name:      "Ada Lovelace",
 				Email:     "ada@example.com",
 				CreatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
@@ -72,7 +72,7 @@ func TestAuthHandlerRegisterReturnsCreatedUser(t *testing.T) {
 
 	var response model.AuthResponse
 	decodeJSON(t, recorder, &response)
-	if response.Token != "signed-token" || response.User.ID != 42 {
+	if response.Token != "signed-token" || response.User.ID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }
