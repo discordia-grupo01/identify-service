@@ -77,8 +77,7 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	return nil
 }
 
-func TestAuthServiceRegisterCreatesUserAndReturnsToken(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
+func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 	repo := &userRepositoryStub{}
 	service := NewAuthService(repo)
 	request := model.RegisterRequest{
@@ -92,11 +91,11 @@ func TestAuthServiceRegisterCreatesUserAndReturnsToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if response == nil || response.Token == "" {
-		t.Fatal("Register() should return a non-empty token")
+	if response == nil || response.ID == "" {
+		t.Fatal("Register() should return the created user")
 	}
-	if response.User.ID != "550e8400-e29b-41d4-a716-446655440000" || response.User.Name != request.Name || response.User.Email != request.Email {
-		t.Fatalf("unexpected user response: %+v", response.User)
+	if response.ID != "550e8400-e29b-41d4-a716-446655440000" || response.Name != request.Name || response.Email != request.Email {
+		t.Fatalf("unexpected user response: %+v", response)
 	}
 	if repo.createdUser == nil {
 		t.Fatal("Create() was not called")
@@ -305,8 +304,7 @@ func parseTokenClaims(t *testing.T, tokenString string) jwt.MapClaims {
 	return claims
 }
 
-func TestAuthServiceRegisterCreatesExpiringSession(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
+func TestAuthServiceRegisterDoesNotCreateSession(t *testing.T) {
 	sessionRepo := &sessionRepositoryStub{}
 	response, err := NewAuthService(&userRepositoryStub{}, sessionRepo).Register(context.Background(), model.RegisterRequest{
 		Name: "Ada Lovelace", Email: "ada@example.com", Password: "Secure123",
@@ -315,14 +313,11 @@ func TestAuthServiceRegisterCreatesExpiringSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if response == nil || response.Token == "" {
-		t.Fatal("Register() must return a token")
+	if response == nil || response.ID == "" {
+		t.Fatal("Register() must return the created user")
 	}
-	if len(sessionRepo.created) != 1 {
-		t.Fatalf("created sessions = %d, want 1", len(sessionRepo.created))
-	}
-	if sessionRepo.createdUserID != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Fatalf("created session user ID = %s, want test user ID", sessionRepo.createdUserID)
+	if len(sessionRepo.created) != 0 {
+		t.Fatalf("created sessions = %d, want 0", len(sessionRepo.created))
 	}
 }
 

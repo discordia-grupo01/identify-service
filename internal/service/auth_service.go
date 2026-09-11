@@ -30,7 +30,7 @@ const (
 )
 
 type AuthService interface {
-	Register(ctx context.Context, req model.RegisterRequest) (*model.AuthResponse, error)
+	Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error)
 	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
 	Logout(ctx context.Context, tokenID string) error
 }
@@ -48,7 +48,7 @@ func NewAuthService(repo repository.UserRepository, sessionRepos ...repository.S
 	return &authService{repo: repo, sessionRepo: sessionRepo}
 }
 
-func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.AuthResponse, error) {
+func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
 
 	if !validatePassword(req.Password) {
 		return nil, ErrPasswordInsecure
@@ -78,26 +78,13 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 		return nil, err
 	}
 
-	token, tokenID, expiresAt, err := generateJWT(user.ID)
-	if err != nil {
-		return nil, err
-	}
-	if s.sessionRepo != nil {
-		if err := s.sessionRepo.Create(ctx, tokenID, user.ID, expiresAt); err != nil {
-			return nil, err
-		}
-	}
-
 	createdAtUTC := user.CreatedAt.UTC()
 
-	return &model.AuthResponse{
-		User: model.UserResponse{
-			ID:        user.ID,
-			Name:      user.Name,
-			Email:     user.Email,
-			CreatedAt: createdAtUTC,
-		},
-		Token: token,
+	return &model.UserResponse{
+		ID:        user.ID,
+		Name:      user.Name,
+		Email:     user.Email,
+		CreatedAt: createdAtUTC,
 	}, nil
 }
 
