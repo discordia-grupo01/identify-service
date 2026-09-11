@@ -148,7 +148,7 @@ func TestRequireAuthRejectsMalformedTokens(t *testing.T) {
 
 func TestRequireAuthRejectsMissingAuthorizationHeader(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
-	
+
 	request := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
 	recorder := httptest.NewRecorder()
 
@@ -192,7 +192,7 @@ func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignedString() error: %v", err)
 	}
-	
+
 	request := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
 	request.Header.Set("Authorization", "Bearer "+signed)
 	recorder := httptest.NewRecorder()
