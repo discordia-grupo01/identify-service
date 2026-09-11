@@ -1,12 +1,12 @@
-# discordia-SERVICIO
+# identify-service
 
-Servicio de <Epica> de Discordia. Cubre las historias: <lista de historias>.
+Servicio de identidad de Discordia: registro, login, sesiones y recuperacion de contraseña. Es donde vive todo lo de usuarios (y, a futuro, perfil).
 
 ## Stack
 - Lenguaje: Go
 - Framework: Gin (github.com/gin-gonic/gin)
-- BDD: PostgreSQL
-- Infra extra: <completar>
+- BDD: PostgreSQL (Supabase en produccion, ver seccion "Supabase" mas abajo)
+- Infra extra: SMTP (envio de emails de recuperacion de contraseña)
 
 ## Setup local
 ```bash
@@ -45,18 +45,20 @@ make run
 
 ## Estructura de carpetas
 ```
-go-template/
+identify-service/
 ├── cmd/
 │   └── api/
-│       └── main.go          entrypoint: arma el router y levanta el server
+│       ├── main.go          entrypoint: arma el router y levanta el server
+│       └── database.go       conexion a Postgres (initDB)
 ├── internal/
-│   ├── handler/              handlers HTTP (reciben el request, parsean, llaman a service)
-│   ├── service/               logica de negocio
-│   ├── repository/            acceso a datos (Postgres, etc.)
+│   ├── handler/              handlers HTTP: auth (registro/login/logout) y password recovery
+│   ├── service/               logica de negocio (auth_service, password_recovery_service)
+│   ├── repository/            acceso a datos: users, sessions, password_recoveries
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
-│   └── events/                 publish/consume de eventos (RabbitMQ, etc.)
-├── migrations/                migraciones de BDD (ej. golang-migrate)
+│   ├── utils/email/            envio de emails (SMTP) para recuperacion de contraseña
+│   └── events/                 publish/consume de eventos (RabbitMQ, etc.) - todavia sin uso
+├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml            gofmt, build, vet y test en cada PR/push a main
@@ -68,7 +70,7 @@ go-template/
 ├── Makefile                   comandos run/test/build/migrate
 └── .env.example                estructura de variables de entorno (sin valores sensibles)
 ```
-`internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go). Las carpetas de `internal/` y `migrations/` vienen vacias (`.gitkeep`) porque el codigo de negocio todavia no existe en el template.
+`internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go). Solo `internal/events/` sigue vacia (`.gitkeep`): todavia no se publican ni consumen eventos desde este servicio.
 
 ## Comandos (Makefile)
 - `make run` - corre el servicio localmente (`go run ./cmd/api`).
@@ -86,16 +88,16 @@ Cobertura minima: 70% (requisito del proyecto).
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
 
 El proyecto de Supabase es **compartido entre todos los servicios de Discordia** (un solo proyecto, un schema por servicio). Pasos:
-1. Una sola vez por proyecto de Supabase: crear el schema de este servicio desde el SQL Editor:
+1. Una sola vez por proyecto de Supabase: crear el schema de este servicio. Se puede hacer sin SQL desde **Database > Schemas > New schema** (nombre `identify`), o corriendo en el SQL Editor:
    ```sql
    CREATE SCHEMA IF NOT EXISTS identify;
    ```
-2. Completar en tu `.env` los datos de conexion de Supabase (Project Settings > Database > Connection string, la conexion **directa**, puerto `5432` - no el pooler `6543`, porque este servicio ya maneja su propio pool con `SetMaxOpenConns`):
+2. Completar en tu `.env` los datos de conexion de Supabase, tomados del boton **Connect** del proyecto, pestaña **Session pooler** (no "Direct connection": ese host solo resuelve por IPv6 y muchas redes no tienen esa salida; tampoco "Transaction pooler", que no sostiene el `search_path` por conexion):
    ```
-   DATABASE_HOST=<host>.supabase.co
+   DATABASE_HOST=aws-0-<region>.pooler.supabase.com
    DATABASE_PORT=5432
    DATABASE_NAME=postgres
-   DATABASE_USER=postgres
+   DATABASE_USER=postgres.<project-ref>
    DATABASE_PASSWORD=<password del proyecto>
    DATABASE_SSLMODE=require
    DATABASE_SCHEMA=identify
@@ -103,13 +105,19 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200) y un `POST /v1/users` + `POST /v1/login` de prueba.
 
 ## Endpoints
-Ver openapi.yaml.
+- `POST /v1/users` - registro de usuario.
+- `POST /v1/login` - login, devuelve el JWT.
+- `POST /v1/logout` - revoca la sesion actual.
+- `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
+- `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
+
+Ver `openapi.yaml` para el detalle de cada request/response.
 
 ## Eventos que publica
-- <evento> - cuando se dispara
+Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
 
 ## Eventos que consume
-- <evento> - que hace al recibirlo
+Todavia no consume eventos.
 
 ## Health checks
 - GET /livez
