@@ -13,11 +13,18 @@ func initDB() *sql.DB {
 	dbUser := getEnv("DATABASE_USER", "discordia")
 	dbPass := getEnv("DATABASE_PASSWORD", "discordia")
 	dbName := getEnv("DATABASE_NAME", "discordia_servicio")
+	dbSSLMode := getEnv("DATABASE_SSLMODE", "disable")
+	dbSchema := getEnv("DATABASE_SCHEMA", "")
 
 	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPass, dbName,
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		dbHost, dbPort, dbUser, dbPass, dbName, dbSSLMode,
 	)
+	if dbSchema != "" {
+		// Fija el search_path de la sesion al schema del servicio (ej. "identify"
+		// en el proyecto de Supabase compartido). 
+		dsn += fmt.Sprintf(" options='-c search_path=%s'", dbSchema)
+	}
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
