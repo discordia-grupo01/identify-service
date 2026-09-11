@@ -26,6 +26,8 @@ make run
 | DATABASE_NAME | - | Nombre de la base. En local, coincide con `POSTGRES_DB` de docker-compose.yml. |
 | DATABASE_USER | - | Usuario de conexion. En local, coincide con `POSTGRES_USER` de docker-compose.yml. |
 | DATABASE_PASSWORD | - | Password de conexion. En local, coincide con `POSTGRES_PASSWORD` de docker-compose.yml. |
+| DATABASE_SSLMODE | disable | `disable` en local; `require` cuando la BDD es Supabase (exige TLS). |
+| DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | RABBITMQ_URL | - | URL de conexion a RabbitMQ. |
 | SMTP_HOST | - | Host del servidor SMTP. |
@@ -72,13 +74,33 @@ go-template/
 - `make run` - corre el servicio localmente (`go run ./cmd/api`).
 - `make test` - corre los tests con cobertura (`go test ./... -cover`).
 - `make build` - compila el binario en `bin/api`.
-- `make migrate` - placeholder, todavia hay que definir la herramienta de migraciones.
+- `make migrate` - corre las migraciones (golang-migrate) contra la BDD que indique `.env` (local o Supabase).
 
 ## Tests
 ```bash
 make test
 ```
 Cobertura minima: 70% (requisito del proyecto).
+
+## Supabase (produccion)
+Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
+
+El proyecto de Supabase es **compartido entre todos los servicios de Discordia** (un solo proyecto, un schema por servicio). Pasos:
+1. Una sola vez por proyecto de Supabase: crear el schema de este servicio desde el SQL Editor:
+   ```sql
+   CREATE SCHEMA IF NOT EXISTS identify;
+   ```
+2. Completar en tu `.env` los datos de conexion de Supabase (Project Settings > Database > Connection string, la conexion **directa**, puerto `5432` - no el pooler `6543`, porque este servicio ya maneja su propio pool con `SetMaxOpenConns`):
+   ```
+   DATABASE_HOST=<host>.supabase.co
+   DATABASE_PORT=5432
+   DATABASE_NAME=postgres
+   DATABASE_USER=postgres
+   DATABASE_PASSWORD=<password del proyecto>
+   DATABASE_SSLMODE=require
+   DATABASE_SCHEMA=identify
+   ```
+3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200) y un `POST /v1/users` + `POST /v1/login` de prueba.
 
 ## Endpoints
 Ver openapi.yaml.
