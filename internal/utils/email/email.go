@@ -93,7 +93,13 @@ func (s *EmailService) SendPasswordResetEmail(request PasswordResetRequest) erro
 
 func (s smtpSender) Send(from string, to []string, message []byte) error {
 	address := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-	return smtp.SendMail(address, smtp.PlainAuth("", s.config.Username, s.config.Password, s.config.Host), from, to, message)
+
+	var auth smtp.Auth
+	if s.config.Username != "" {
+		auth = smtp.PlainAuth("", s.config.Username, s.config.Password, s.config.Host)
+	}
+
+	return smtp.SendMail(address, auth, from, to, message)
 }
 
 func getEnv(key, fallback string) string {
