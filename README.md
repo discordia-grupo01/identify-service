@@ -40,6 +40,8 @@ make run
 | PASSWORD_RESET_URL | http://localhost:3000/reset-password | URL base del frontend para recuperar la contraseña. |
 | PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
+| PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
+| PROFILE_IMAGE_URL | /uploads/profile-images | URL publica base de las imagenes de perfil. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
@@ -110,8 +112,11 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/logout` - revoca la sesion actual.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
+- `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
 
 Ver `openapi.yaml` para el detalle de cada request/response.
+
+Las imagenes locales se guardan en `PROFILE_IMAGE_DIR` y se sirven desde `PROFILE_IMAGE_URL`. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo por Oracle Object Storage sin cambiar el servicio de perfil.
 
 ## Eventos que publica
 Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
