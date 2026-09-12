@@ -22,7 +22,7 @@ func initDB() *sql.DB {
 	)
 	if dbSchema != "" {
 		// Fija el search_path de la sesion al schema del servicio (ej. "identify"
-		// en el proyecto de Supabase compartido). 
+		// en el proyecto de Supabase compartido).
 		dsn += fmt.Sprintf(" options='-c search_path=%s'", dbSchema)
 	}
 
