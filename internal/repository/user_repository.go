@@ -46,12 +46,12 @@ func (r *postgresUserRepository) GetByEmail(ctx context.Context, email string) (
 
 func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) error {
 	query := `
-		INSERT INTO users (name, email, password_hash) 
-		VALUES ($1, $2, $3) 
-		RETURNING id, created_at, updated_at`
+		INSERT INTO users (id, name, email, password_hash)
+		VALUES ($1, $2, $3, $4)
+		RETURNING created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, query, user.Name, user.Email, user.PasswordHash).
-		Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, query, user.ID, user.Name, user.Email, user.PasswordHash).
+		Scan(&user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return err
 	}
