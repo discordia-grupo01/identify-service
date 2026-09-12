@@ -16,6 +16,7 @@ type userRepositoryStub struct {
 	existingUser *model.User
 	getErr       error
 	createErr    error
+	updateErr    error
 	createdUser  *model.User
 }
 
@@ -82,6 +83,9 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 }
 
 func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name string, description string, avatarURL string) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	if r.existingUser == nil {
 		r.existingUser = &model.User{}
 	}

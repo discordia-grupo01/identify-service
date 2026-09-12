@@ -13,19 +13,24 @@ import (
 )
 
 type profileImageStorageStub struct {
-	url     string
-	data    []byte
-	deleted string
+	url       string
+	data      []byte
+	deleteErr error
+	saveErr   error
+	deleted   string
 }
 
 func (s *profileImageStorageStub) Save(_ context.Context, _ string, data []byte, _ string) (string, error) {
+	if s.saveErr != nil {
+		return "", s.saveErr
+	}
 	s.data = data
 	return s.url, nil
 }
 
 func (s *profileImageStorageStub) Delete(_ context.Context, imageURL string) error {
 	s.deleted = imageURL
-	return nil
+	return s.deleteErr
 }
 
 func TestProfileServiceUpdatesProfileAndAvatar(t *testing.T) {
@@ -75,6 +80,63 @@ func TestProfileServiceRejectsInvalidProfileData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProfileServiceNormalizesNameAndDescription(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Old"}}
+	profile := NewProfileService(repo, &profileImageStorageStub{})
+	name := "  Ada   Lovelace  "
+	description := "  A profile\n  description  "
+
+	response, err := profile.Update(context.Background(), "user-id", model.ProfileUpdateRequest{Name: &name, Description: &description})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if response.Name != "Ada Lovelace" || response.Description != "A profile\n  description" {
+		t.Fatalf("normalized response = %+v", response)
+	}
+}
+
+func TestProfileServiceRejectsNoChanges(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{})
+	if err == nil || err.Error() != "no hay cambios para guardar" {
+		t.Fatalf("Update() error = %v, want no changes error", err)
+	}
+}
+
+func TestProfileServicePropagatesRepositoryAndStorageErrors(t *testing.T) {
+	databaseErr := errors.New("database unavailable")
+	storageErr := errors.New("storage unavailable")
+
+	t.Run("get user", func(t *testing.T) {
+		repo := &userRepositoryStub{getErr: databaseErr}
+		_, err := NewProfileService(repo, &profileImageStorageStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Name: stringPointer("Ada")})
+		if !errors.Is(err, databaseErr) {
+			t.Fatalf("Update() error = %v, want %v", err, databaseErr)
+		}
+	})
+
+	t.Run("save image", func(t *testing.T) {
+		repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+		storage := &profileImageStorageStub{saveErr: storageErr}
+		_, err := NewProfileService(repo, storage).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Image: validPNG(t), ImageContentType: "image/png", ImageProvided: true})
+		if !errors.Is(err, storageErr) {
+			t.Fatalf("Update() error = %v, want %v", err, storageErr)
+		}
+	})
+
+	t.Run("update profile", func(t *testing.T) {
+		repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/old.png"}, updateErr: databaseErr}
+		storage := &profileImageStorageStub{url: "/new.png"}
+		_, err := NewProfileService(repo, storage).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Image: validPNG(t), ImageContentType: "image/png", ImageProvided: true})
+		if !errors.Is(err, databaseErr) {
+			t.Fatalf("Update() error = %v, want %v", err, databaseErr)
+		}
+		if storage.deleted != "/new.png" {
+			t.Fatalf("new avatar = %q, want cleanup after persistence failure", storage.deleted)
+		}
+	})
 }
 
 func validPNG(t *testing.T) []byte {
