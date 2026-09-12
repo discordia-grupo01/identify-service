@@ -113,6 +113,7 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
+- `GET /v1/me/profile` - Envia informacion del usuario. Requiere Bearer JWT del mismo
 
 Ver `openapi.yaml` para el detalle de cada request/response.
 
