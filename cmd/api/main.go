@@ -96,6 +96,7 @@ func main() {
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
+		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
 	}
 
 	addr := host + ":" + port

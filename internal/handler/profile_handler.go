@@ -22,6 +22,35 @@ func NewProfileHandler(profileService service.ProfileService) *ProfileHandler {
 	return &ProfileHandler{service: profileService}
 }
 
+func (h *ProfileHandler) GetProfile(c *gin.Context) {
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+			Code:    "UNAUTHORIZED",
+			Message: "La sesión no es válida",
+		}})
+		return
+	}
+
+	user, err := h.service.GetProfile(c.Request.Context(), userID.(string))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
+				Code:    "USER_NOT_FOUND",
+				Message: "El usuario no existe",
+			}})
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
+				Code:    "INTERNAL_SERVER_ERROR",
+				Message: "Ha ocurrido un error inesperado en el servidor",
+			}})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
 func (h *ProfileHandler) Update(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {

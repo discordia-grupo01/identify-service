@@ -37,6 +37,50 @@ func (s *profileServiceStub) Update(_ context.Context, userID string, request mo
 	return s.response, s.err
 }
 
+func (s *profileServiceStub) GetProfile(_ context.Context, userID string) (*model.UserResponse, error) {
+	s.called = true
+	s.userID = userID
+	return s.response, s.err
+}
+
+func TestGetProfileHandlerReturnsProfile(t *testing.T) {
+	serviceStub := &profileServiceStub{response: &model.UserResponse{ID: "user-id", Name: "Ada Lovelace", AvatarURL: "/uploads/user-id.png"}}
+	recorder := performGetProfileRequest(t, serviceStub, "user-id")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.called || serviceStub.userID != "user-id" {
+		t.Fatalf("service received user ID %q, want user-id", serviceStub.userID)
+	}
+
+	var response model.UserResponse
+	decodeProfileJSON(t, recorder, &response)
+	if response.ID != "user-id" || response.Name != "Ada Lovelace" || response.AvatarURL != "/uploads/user-id.png" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestGetProfileHandlerReturnsNotFound(t *testing.T) {
+	serviceStub := &profileServiceStub{err: service.ErrUserNotFound}
+	recorder := performGetProfileRequest(t, serviceStub, "user-id")
+
+	assertProfileError(t, recorder, http.StatusNotFound, "USER_NOT_FOUND")
+	if !serviceStub.called || serviceStub.userID != "user-id" {
+		t.Fatalf("service received user ID %q, want user-id", serviceStub.userID)
+	}
+}
+
+func TestGetProfileHandlerReturnsUnauthorized(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performGetProfileRequestWithoutUser(t, serviceStub, "user-id")
+
+	assertProfileError(t, recorder, http.StatusUnauthorized, "UNAUTHORIZED")
+	if serviceStub.called {
+		t.Fatal("service must not be called without authentication")
+	}
+}
+
 func TestProfileHandlerUpdatesProfileFromMultipartRequest(t *testing.T) {
 	serviceStub := &profileServiceStub{response: &model.UserResponse{ID: "user-id", Name: "Ada Lovelace", AvatarURL: "/uploads/user-id.png"}}
 	recorder := performProfileRequest(t, serviceStub, "user-id", "Ada Lovelace", "Updated description", validProfilePNG(t))
@@ -187,4 +231,31 @@ func validProfilePNG(t *testing.T) []byte {
 		t.Fatalf("png.Encode() error = %v", err)
 	}
 	return buffer.Bytes()
+}
+
+func performGetProfileRequest(t *testing.T, profileService service.ProfileService, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/me/profile", nil)
+	router := gin.New()
+	router.GET("/v1/me/profile", func(c *gin.Context) {
+		c.Set(middleware.UserIDKey, userID)
+		NewProfileHandler(profileService).GetProfile(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performGetProfileRequestWithoutUser(t *testing.T, profileService service.ProfileService, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/me/profile", nil)
+	router := gin.New()
+	router.GET("/v1/me/profile", func(c *gin.Context) {
+		NewProfileHandler(profileService).GetProfile(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
 }

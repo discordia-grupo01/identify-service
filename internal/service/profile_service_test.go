@@ -139,6 +139,115 @@ func TestProfileServicePropagatesRepositoryAndStorageErrors(t *testing.T) {
 	})
 }
 
+func TestProfileServiceRejectsMismatchedImageContentType(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	storage := &profileImageStorageStub{}
+	_, err := NewProfileService(repo, storage).Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Image: validPNG(t), ImageContentType: "image/jpeg", ImageProvided: true,
+	})
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+}
+
+func TestProfileServiceRejectsOversizedImageDimensions(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+
+	largeImage := image.NewRGBA(image.Rect(0, 0, 4097, 1))
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, largeImage); err != nil {
+		t.Fatalf("png.Encode() error = %v", err)
+	}
+
+	req := model.ProfileUpdateRequest{
+		Image:            buffer.Bytes(),
+		ImageContentType: "image/png",
+		ImageProvided:    true,
+	}
+
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).Update(context.Background(), "user-id", req)
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+}
+
+func TestProfileServicePartiallyUpdatesProfile(t *testing.T) {
+	user := &model.User{
+		ID:          "user-id",
+		Name:        "Ada Lovelace",
+		Description: "Original description",
+		AvatarURL:   "/avatar.png",
+	}
+	repo := &userRepositoryStub{existingUser: user}
+	profile := NewProfileService(repo, &profileImageStorageStub{})
+
+	newName := "Ada Byron"
+	response, err := profile.Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Name: &newName,
+	})
+
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if response.Name != "Ada Byron" {
+		t.Fatalf("Name = %q, want Ada Byron", response.Name)
+	}
+	if response.Description != "Original description" {
+		t.Fatalf("Description = %q, want Original description (preserved)", response.Description)
+	}
+}
+
+func TestProfileServiceDeletesOldAvatarOnUpdate(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/old.png"}}
+	storage := &profileImageStorageStub{url: "/new.png"}
+	_, err := NewProfileService(repo, storage).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Image: validPNG(t), ImageContentType: "image/png", ImageProvided: true})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if storage.deleted != "/old.png" {
+		t.Fatalf("old avatar = %q, want it deleted", storage.deleted)
+	}
+}
+
+func TestProfileServiceDoesNotDeleteOldAvatarIfNotChanged(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/avatar.png"}}
+	storage := &profileImageStorageStub{url: "/avatar.png"}
+	_, err := NewProfileService(repo, storage).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Name: stringPointer("Ada Lovelace")})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if storage.deleted != "" {
+		t.Fatalf("avatar = %q, want no deletion", storage.deleted)
+	}
+}
+
+func TestProfileServiceReturnsNotFoundForNonexistentUser(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Name: stringPointer("Ada")})
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
+func TestProfileServiceReturnsNotFoundForGetProfile(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).GetProfile(context.Background(), "user-id")
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("GetProfile() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
+func TestProfileServiceReturnsProfile(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", Description: "A profile", AvatarURL: "/avatar.png"}}
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).GetProfile(context.Background(), "user-id")
+	if err != nil {
+		t.Fatalf("GetProfile() error = %v", err)
+	}
+	if response.ID != "user-id" || response.Name != "Ada" || response.Description != "A profile" || response.AvatarURL != "/avatar.png" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func validPNG(t *testing.T) []byte {
 	t.Helper()
 	imageData := image.NewRGBA(image.Rect(0, 0, 2, 2))

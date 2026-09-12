@@ -34,6 +34,7 @@ var (
 
 type ProfileService interface {
 	Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error)
+	GetProfile(ctx context.Context, userID string) (*model.UserResponse, error)
 }
 
 type profileService struct {
@@ -43,6 +44,17 @@ type profileService struct {
 
 func NewProfileService(repo repository.UserRepository, storage profileimage.Storage) ProfileService {
 	return &profileService{repo: repo, storage: storage}
+}
+
+func (s *profileService) GetProfile(ctx context.Context, userID string) (*model.UserResponse, error) {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return model.NewUserResponse(user), nil
 }
 
 func (s *profileService) Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error) {
