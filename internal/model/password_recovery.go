@@ -8,7 +8,7 @@ type PasswordRecoveryRequest struct {
 
 type PasswordRecovery struct {
 	ID        int64
-	UserID    int64
+	UserID    string
 	Email     string
 	TokenHash string
 	ExpiresAt time.Time

@@ -13,7 +13,7 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 }
 
-func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID int64, passwordHash string) error {
+func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE users
 		SET password_hash = $1, updated_at = CURRENT_TIMESTAMP

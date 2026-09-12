@@ -70,7 +70,7 @@ func newPasswordRecoveryTestService(repo *passwordRecoveryRepositoryStub, users 
 
 func TestRecoverPasswordCreatesSingleUseExpiringTokenAndSendsEmail(t *testing.T) {
 	repo := &passwordRecoveryRepositoryStub{}
-	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Name: "Ada", Email: "ada@example.com"}}
+	users := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Name: "Ada", Email: "ada@example.com"}}
 	mailer := &passwordRecoveryMailerStub{}
 	service := newPasswordRecoveryTestService(repo, users, mailer)
 
@@ -153,7 +153,7 @@ func TestRecoverPasswordPropagatesUserLookupError(t *testing.T) {
 
 func TestRecoverPasswordPropagatesCreateErrorWithoutSendingEmail(t *testing.T) {
 	repo := &passwordRecoveryRepositoryStub{createErr: errors.New("insert failed")}
-	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	users := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
 	mailer := &passwordRecoveryMailerStub{}
 	service := newPasswordRecoveryTestService(repo, users, mailer)
 
@@ -168,7 +168,7 @@ func TestRecoverPasswordPropagatesCreateErrorWithoutSendingEmail(t *testing.T) {
 
 func TestRecoverPasswordPropagatesMailerError(t *testing.T) {
 	repo := &passwordRecoveryRepositoryStub{}
-	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	users := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
 	mailer := &passwordRecoveryMailerStub{err: errors.New("SMTP unavailable")}
 	service := newPasswordRecoveryTestService(repo, users, mailer)
 
@@ -183,7 +183,7 @@ func TestRecoverPasswordPropagatesMailerError(t *testing.T) {
 
 func TestRecoverPasswordRejectsInvalidResetBaseURL(t *testing.T) {
 	repo := &passwordRecoveryRepositoryStub{}
-	users := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	users := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
 	mailer := &passwordRecoveryMailerStub{}
 	service := newPasswordRecoveryTestService(repo, users, mailer)
 	service.resetBaseURL = "://invalid"

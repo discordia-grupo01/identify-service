@@ -7,13 +7,13 @@ import (
 	"errors"
 	"os"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -30,7 +30,7 @@ const (
 )
 
 type AuthService interface {
-	Register(ctx context.Context, req model.RegisterRequest) (*model.AuthResponse, error)
+	Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error)
 	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
 	Logout(ctx context.Context, tokenID string) error
 }
@@ -48,7 +48,7 @@ func NewAuthService(repo repository.UserRepository, sessionRepos ...repository.S
 	return &authService{repo: repo, sessionRepo: sessionRepo}
 }
 
-func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.AuthResponse, error) {
+func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
 
 	if !validatePassword(req.Password) {
 		return nil, ErrPasswordInsecure
@@ -68,6 +68,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	}
 
 	user := &model.User{
+		ID:           uuid.NewString(),
 		Name:         req.Name,
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
@@ -77,26 +78,13 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 		return nil, err
 	}
 
-	token, tokenID, expiresAt, err := generateJWT(user.ID)
-	if err != nil {
-		return nil, err
-	}
-	if s.sessionRepo != nil {
-		if err := s.sessionRepo.Create(ctx, tokenID, user.ID, expiresAt); err != nil {
-			return nil, err
-		}
-	}
-
 	createdAtUTC := user.CreatedAt.UTC()
 
-	return &model.AuthResponse{
-		User: model.UserResponse{
-			ID:        user.ID,
-			Name:      user.Name,
-			Email:     user.Email,
-			CreatedAt: createdAtUTC,
-		},
-		Token: token,
+	return &model.UserResponse{
+		ID:        user.ID,
+		Name:      user.Name,
+		Email:     user.Email,
+		CreatedAt: createdAtUTC,
 	}, nil
 }
 
@@ -154,7 +142,7 @@ func validatePassword(password string) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
-func generateJWT(userID int64) (string, string, time.Time, error) {
+func generateJWT(userID string) (string, string, time.Time, error) {
 	secret := os.Getenv("JWT_SECRET")
 	tokenID, err := newTokenID()
 	if err != nil {
@@ -163,7 +151,7 @@ func generateJWT(userID int64) (string, string, time.Time, error) {
 	expiresAt := time.Now().Add(HOURS_TO_EXPIRE * time.Hour)
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
-		"sub": strconv.FormatInt(userID, 10),
+		"sub": userID,
 		"jti": tokenID,
 		"exp": expiresAt.Unix(),
 	}

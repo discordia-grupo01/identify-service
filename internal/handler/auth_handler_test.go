@@ -18,6 +18,7 @@ import (
 
 type authServiceStub struct {
 	response     *model.AuthResponse
+	registerUser *model.UserResponse
 	err          error
 	request      model.RegisterRequest
 	loginRequest model.LoginRequest
@@ -28,10 +29,10 @@ type authServiceStub struct {
 
 var _ service.AuthService = (*authServiceStub)(nil)
 
-func (s *authServiceStub) Register(_ context.Context, request model.RegisterRequest) (*model.AuthResponse, error) {
+func (s *authServiceStub) Register(_ context.Context, request model.RegisterRequest) (*model.UserResponse, error) {
 	s.called = true
 	s.request = request
-	return s.response, s.err
+	return s.registerUser, s.err
 }
 
 func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (*model.AuthResponse, error) {
@@ -48,14 +49,11 @@ func (s *authServiceStub) Logout(_ context.Context, tokenID string) error {
 
 func TestAuthHandlerRegisterReturnsCreatedUser(t *testing.T) {
 	serviceStub := &authServiceStub{
-		response: &model.AuthResponse{
-			User: model.UserResponse{
-				ID:        42,
-				Name:      "Ada Lovelace",
-				Email:     "ada@example.com",
-				CreatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
-			},
-			Token: "signed-token",
+		registerUser: &model.UserResponse{
+			ID:        "550e8400-e29b-41d4-a716-446655440000",
+			Name:      "Ada Lovelace",
+			Email:     "ada@example.com",
+			CreatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
 		},
 	}
 	recorder := performRegisterRequest(t, serviceStub, `{"name":"Ada Lovelace","email":"ada@example.com","password":"Secure123"}`)
@@ -70,9 +68,9 @@ func TestAuthHandlerRegisterReturnsCreatedUser(t *testing.T) {
 		t.Fatalf("service received unexpected request: %+v", serviceStub.request)
 	}
 
-	var response model.AuthResponse
+	var response model.UserResponse
 	decodeJSON(t, recorder, &response)
-	if response.Token != "signed-token" || response.User.ID != 42 {
+	if response.ID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }

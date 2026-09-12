@@ -21,7 +21,7 @@ type userRepositoryStub struct {
 
 type sessionRepositoryStub struct {
 	createdTokenID string
-	createdUserID  int64
+	createdUserID  string
 	createdExpiry  time.Time
 	revokedTokenID string
 	active         map[string]bool
@@ -29,7 +29,7 @@ type sessionRepositoryStub struct {
 	created        map[string]time.Time
 }
 
-func (r *sessionRepositoryStub) Create(_ context.Context, tokenID string, userID int64, expiresAt time.Time) error {
+func (r *sessionRepositoryStub) Create(_ context.Context, tokenID string, userID string, expiresAt time.Time) error {
 	r.createdTokenID = tokenID
 	r.createdUserID = userID
 	r.createdExpiry = expiresAt
@@ -72,13 +72,12 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	}
 
 	r.createdUser = user
-	user.ID = 42
+	user.ID = "550e8400-e29b-41d4-a716-446655440000"
 	user.CreatedAt = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	return nil
 }
 
-func TestAuthServiceRegisterCreatesUserAndReturnsToken(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
+func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 	repo := &userRepositoryStub{}
 	service := NewAuthService(repo)
 	request := model.RegisterRequest{
@@ -92,11 +91,11 @@ func TestAuthServiceRegisterCreatesUserAndReturnsToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if response == nil || response.Token == "" {
-		t.Fatal("Register() should return a non-empty token")
+	if response == nil || response.ID == "" {
+		t.Fatal("Register() should return the created user")
 	}
-	if response.User.ID != 42 || response.User.Name != request.Name || response.User.Email != request.Email {
-		t.Fatalf("unexpected user response: %+v", response.User)
+	if response.ID != "550e8400-e29b-41d4-a716-446655440000" || response.Name != request.Name || response.Email != request.Email {
+		t.Fatalf("unexpected user response: %+v", response)
 	}
 	if repo.createdUser == nil {
 		t.Fatal("Create() was not called")
@@ -110,7 +109,7 @@ func TestAuthServiceRegisterCreatesUserAndReturnsToken(t *testing.T) {
 }
 
 func TestAuthServiceRegisterRejectsExistingEmail(t *testing.T) {
-	repo := &userRepositoryStub{existingUser: &model.User{ID: 7, Email: "ada@example.com"}}
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
 	service := NewAuthService(repo)
 
 	response, err := service.Register(context.Background(), model.RegisterRequest{
@@ -203,7 +202,7 @@ func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           42,
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Name:         "Ada Lovelace",
 		Email:        "ada@example.com",
 		PasswordHash: string(passwordHash),
@@ -219,7 +218,7 @@ func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if response == nil || response.Token == "" || response.User.ID != 42 {
+	if response == nil || response.Token == "" || response.User.ID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Fatalf("unexpected login response: %+v", response)
 	}
 	if sessionRepo.createdTokenID == "" {
@@ -241,7 +240,7 @@ func TestAuthServiceLoginCreatesUniqueExpiringSession(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           42,
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Name:         "Ada Lovelace",
 		Email:        "ada@example.com",
 		PasswordHash: string(passwordHash),
@@ -305,8 +304,7 @@ func parseTokenClaims(t *testing.T, tokenString string) jwt.MapClaims {
 	return claims
 }
 
-func TestAuthServiceRegisterCreatesExpiringSession(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
+func TestAuthServiceRegisterDoesNotCreateSession(t *testing.T) {
 	sessionRepo := &sessionRepositoryStub{}
 	response, err := NewAuthService(&userRepositoryStub{}, sessionRepo).Register(context.Background(), model.RegisterRequest{
 		Name: "Ada Lovelace", Email: "ada@example.com", Password: "Secure123",
@@ -315,14 +313,11 @@ func TestAuthServiceRegisterCreatesExpiringSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if response == nil || response.Token == "" {
-		t.Fatal("Register() must return a token")
+	if response == nil || response.ID == "" {
+		t.Fatal("Register() must return the created user")
 	}
-	if len(sessionRepo.created) != 1 {
-		t.Fatalf("created sessions = %d, want 1", len(sessionRepo.created))
-	}
-	if sessionRepo.createdUserID != 42 {
-		t.Fatalf("created session user ID = %d, want 42", sessionRepo.createdUserID)
+	if len(sessionRepo.created) != 0 {
+		t.Fatalf("created sessions = %d, want 0", len(sessionRepo.created))
 	}
 }
 
