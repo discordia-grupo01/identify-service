@@ -12,6 +12,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
+	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -53,6 +54,13 @@ func main() {
 	}
 	passwordRecoveryService := service.NewPasswordRecoveryService(passwordRecoveryRepo, userRepo, emailService)
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
+	profileImageStorage := profileimage.NewLocalStorage(
+		getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"),
+		getEnv("PROFILE_IMAGE_URL", "/uploads/profile-images"),
+	)
+	profileService := service.NewProfileService(userRepo, profileImageStorage)
+	profileHandler := handler.NewProfileHandler(profileService)
+	router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
 
 	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
 	router.GET("/livez", func(c *gin.Context) {
@@ -87,6 +95,7 @@ func main() {
 		api.POST("/logout", middleware.RequireAuth(sessionRepo), authHandler.Logout)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
+		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
 	}
 
 	addr := host + ":" + port

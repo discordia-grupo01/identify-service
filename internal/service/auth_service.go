@@ -80,12 +80,8 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 
 	createdAtUTC := user.CreatedAt.UTC()
 
-	return &model.UserResponse{
-		ID:        user.ID,
-		Name:      user.Name,
-		Email:     user.Email,
-		CreatedAt: createdAtUTC,
-	}, nil
+	user.CreatedAt = createdAtUTC
+	return model.NewUserResponse(user), nil
 }
 
 func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error) {
@@ -108,12 +104,7 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	}
 
 	return &model.AuthResponse{
-		User: model.UserResponse{
-			ID:        user.ID,
-			Name:      user.Name,
-			Email:     user.Email,
-			CreatedAt: user.CreatedAt.UTC(),
-		},
+		User:  *model.NewUserResponse(user),
 		Token: token,
 	}, nil
 }

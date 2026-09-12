@@ -66,6 +66,10 @@ func (r *userRepositoryStub) GetByEmail(_ context.Context, _ string) (*model.Use
 	return r.existingUser, r.getErr
 }
 
+func (r *userRepositoryStub) GetByID(_ context.Context, _ string) (*model.User, error) {
+	return r.existingUser, r.getErr
+}
+
 func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	if r.createErr != nil {
 		return r.createErr
@@ -74,6 +78,16 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	r.createdUser = user
 	user.ID = "550e8400-e29b-41d4-a716-446655440000"
 	user.CreatedAt = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	return nil
+}
+
+func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name string, description string, avatarURL string) error {
+	if r.existingUser == nil {
+		r.existingUser = &model.User{}
+	}
+	r.existingUser.Name = name
+	r.existingUser.Description = description
+	r.existingUser.AvatarURL = avatarURL
 	return nil
 }
 
