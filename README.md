@@ -122,7 +122,7 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
 - `GET /v1/me/profile` - Envia informacion del usuario. Requiere Bearer JWT del mismo
-- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, status_text, status_emoji, created_at; sin email ni description). Requiere Bearer JWT.
+- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, status_text, status_emoji, created_at; sin email ni description). Requiere Bearer JWT. **No incluye "servidores en comun"**: esa parte de HU 36 depende de conocer membresias de `discordia-servers` y queda pendiente hasta implementar el flujo via RabbitMQ (publisher en `discordia-servers`, consumer aca) documentado en un plan aparte.
 - `PUT /v1/me/status` - fija o actualiza el estado personalizado (status_text, status_emoji). Cada campo es independiente: omitirlo no lo toca, mandarlo vacio lo limpia. Requiere Bearer JWT.
 - `DELETE /v1/me/status` - limpia el estado personalizado (idempotente). Requiere Bearer JWT.
 
