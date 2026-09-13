@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -61,8 +62,15 @@ func (c *Consumer) Start(ctx context.Context) {
 	}
 }
 
+// connectionName se muestra en la UI/API de management de RabbitMQ, para
+// poder identificar esta conexión (ej. en tests que la cierran a propósito
+// para verificar la reconexión).
+const connectionName = "discordia-identify-server-memberships"
+
 func (c *Consumer) consumeOnce(ctx context.Context) error {
-	conn, err := amqp.Dial(c.url)
+	properties := amqp.NewConnectionProperties()
+	properties.SetClientConnectionName(connectionName)
+	conn, err := amqp.DialConfig(c.url, amqp.Config{Properties: properties})
 	if err != nil {
 		return err
 	}
@@ -128,6 +136,19 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, routingKey st
 		log.Printf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
 		return false
 	}
+	// server_id llega como TEXT en el JSON pero la columna es UUID: un valor
+	// que no parsea como UUID (o un user_id vacío) haría fallar el INSERT de
+	// forma permanente, no transitoria. Sin este chequeo, shouldRequeue lo
+	// trataría como fallo de DB y lo reintentaría para siempre (mensaje
+	// "poison"). Se descarta acá, igual que un payload malformado.
+	if payload.UserID == "" {
+		log.Printf("events: payload inválido en %q (user_id vacío), event_id=%s, descartando mensaje", routingKey, payload.EventID)
+		return false
+	}
+	if _, err := uuid.Parse(payload.ServerID); err != nil {
+		log.Printf("events: payload inválido en %q (server_id %q no es un UUID), event_id=%s: %v, descartando mensaje", routingKey, payload.ServerID, payload.EventID, err)
+		return false
+	}
 
 	var err error
 	switch routingKey {
@@ -137,8 +158,12 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, routingKey st
 		err = handler.HandleMemberLeft(ctx, payload)
 	}
 	if err != nil {
-		log.Printf("events: fallo transitorio procesando %q, reintentando: %v", routingKey, err)
+		log.Printf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, payload.EventID, err)
 		return true
 	}
+	// event_id identifica este evento en los logs de discordia-servers (el
+	// publisher) para poder correlacionar ambos lados de principio a fin; no
+	// participa en la idempotencia acá (esa la da occurred_at vía Upsert).
+	log.Printf("events: procesado %q event_id=%s server_id=%s user_id=%s", routingKey, payload.EventID, payload.ServerID, payload.UserID)
 	return false
 }

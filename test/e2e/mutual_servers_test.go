@@ -3,7 +3,9 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -284,6 +286,148 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 		}
 		return len(publicProfile.MutualServerIDs) == 0
 	}, "el consumer no reflejó el member_left en el endpoint")
+}
+
+// TestConsumerReconnectsAfterConnectionDrop fuerza el cierre de la conexión
+// AMQP real del consumer (vía la API de management de RabbitMQ, simulando
+// una caída de red o un restart del broker) y verifica que Consumer.Start
+// se reconecta solo y retoma el consumo, sin necesitar reiniciar el proceso.
+// Se saltea si no hay RABBITMQ_URL, mismo criterio que los demás tests e2e
+// que dependen de un RabbitMQ real.
+func TestConsumerReconnectsAfterConnectionDrop(t *testing.T) {
+	rabbitMQURL := os.Getenv("RABBITMQ_URL")
+	if rabbitMQURL == "" {
+		t.Skip("RABBITMQ_URL no está seteado: este test e2e requiere un RabbitMQ real")
+	}
+
+	db := setupTestDB(t)
+	membershipRepo := repository.NewServerMembershipRepository(db)
+	managementURL := managementAPIBaseURL(t, rabbitMQURL)
+
+	declareAndPurgeMembershipQueue(t, rabbitMQURL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo))
+	go consumer.Start(ctx)
+
+	serverID := "66666666-1111-2222-3333-444444444444"
+
+	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
+		EventID: "aaaaaaaa-1111-1111-1111-111111111111", ServerID: serverID, UserID: "user-before-drop", OccurredAt: time.Now().UTC(),
+	})
+	waitForCondition(t, 10*time.Second, func() bool {
+		return membershipIsActive(t, membershipRepo, "user-before-drop", serverID)
+	}, "el consumer no procesó el evento previo a la caída de conexión")
+
+	closeConsumerConnection(t, managementURL, connectionNameForTest)
+
+	// Publicar inmediatamente después de cerrar la conexión: si Start() no
+	// reconectara, este evento se quedaría en la cola sin consumir para
+	// siempre y el waitForCondition de abajo fallaría por timeout.
+	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
+		EventID: "bbbbbbbb-2222-2222-2222-222222222222", ServerID: serverID, UserID: "user-after-drop", OccurredAt: time.Now().UTC(),
+	})
+	waitForCondition(t, 15*time.Second, func() bool {
+		return membershipIsActive(t, membershipRepo, "user-after-drop", serverID)
+	}, "el consumer no se reconectó (o no retomó el consumo) tras la caída de conexión")
+}
+
+func membershipIsActive(t *testing.T, membershipRepo repository.ServerMembershipRepository, userID string, serverID string) bool {
+	t.Helper()
+	mutualIDs, err := membershipRepo.ListMutualServerIDs(context.Background(), userID, userID)
+	if err != nil {
+		t.Fatalf("ListMutualServerIDs() error = %v", err)
+	}
+	// ListMutualServerIDs compara dos usuarios; contra sí mismo funciona
+	// igual (es solo un JOIN por server_id) y sirve para chequear "¿está
+	// userID activo en serverID?" sin agregar un método nuevo al repo solo
+	// para este test.
+	for _, id := range mutualIDs {
+		if id == serverID {
+			return true
+		}
+	}
+	return false
+}
+
+// connectionNameForTest debe coincidir con el nombre de conexión que
+// Consumer usa internamente (ver internal/events/consumer.go), para poder
+// encontrarla en la API de management y cerrarla a propósito.
+const connectionNameForTest = "discordia-identify-server-memberships"
+
+func managementAPIBaseURL(t *testing.T, rabbitMQURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rabbitMQURL)
+	if err != nil {
+		t.Fatalf("url.Parse(%q) error = %v", rabbitMQURL, err)
+	}
+	host := parsed.Hostname()
+	user := "guest"
+	pass := "guest"
+	if parsed.User != nil {
+		user = parsed.User.Username()
+		if p, ok := parsed.User.Password(); ok {
+			pass = p
+		}
+	}
+	return fmt.Sprintf("http://%s:%s@%s:15672", user, pass, host)
+}
+
+// closeConsumerConnection busca, en la API de management de RabbitMQ, la
+// conexión AMQP abierta con el nombre dado y la cierra a la fuerza (DELETE),
+// simulando una caída de red o un restart del broker sin tener que tirar
+// abajo el contenedor entero.
+func closeConsumerConnection(t *testing.T, managementURL string, connectionName string) {
+	t.Helper()
+
+	var connectionID string
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		connections := listManagementConnections(t, managementURL)
+		for _, conn := range connections {
+			clientProperties, _ := conn["client_properties"].(map[string]any)
+			if name, _ := clientProperties["connection_name"].(string); name == connectionName {
+				connectionID, _ = conn["name"].(string)
+				break
+			}
+		}
+		if connectionID != "" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if connectionID == "" {
+		t.Fatalf("no se encontró en RabbitMQ management una conexión abierta llamada %q", connectionName)
+	}
+
+	request, err := http.NewRequest(http.MethodDelete, managementURL+"/api/connections/"+url.PathEscape(connectionID), nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("cerrar conexión %q: %v", connectionID, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE /api/connections/%s status = %d, want %d", connectionID, response.StatusCode, http.StatusNoContent)
+	}
+}
+
+func listManagementConnections(t *testing.T, managementURL string) []map[string]any {
+	t.Helper()
+	response, err := http.Get(managementURL + "/api/connections")
+	if err != nil {
+		t.Fatalf("GET /api/connections error = %v", err)
+	}
+	defer response.Body.Close()
+
+	var connections []map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&connections); err != nil {
+		t.Fatalf("decode /api/connections: %v", err)
+	}
+	return connections
 }
 
 func declareAndPurgeMembershipQueue(t *testing.T, rabbitMQURL string) {

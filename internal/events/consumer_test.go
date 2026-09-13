@@ -51,6 +51,44 @@ func TestShouldRequeueDiscardsMalformedPayload(t *testing.T) {
 	}
 }
 
+func TestShouldRequeueDiscardsInvalidServerID(t *testing.T) {
+	handler := &membershipHandlerStub{}
+	body, err := json.Marshal(EventPayload{
+		EventID: "11111111-1111-1111-1111-111111111111", ServerID: "not-a-uuid", UserID: "user-id", OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberJoined, body)
+
+	if requeue {
+		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento: un server_id inválido es un error permanente, no transitorio)")
+	}
+	if len(handler.joinedCalls) != 0 {
+		t.Fatalf("handler no debería haber sido invocado con un server_id inválido")
+	}
+}
+
+func TestShouldRequeueDiscardsEmptyUserID(t *testing.T) {
+	handler := &membershipHandlerStub{}
+	body, err := json.Marshal(EventPayload{
+		EventID: "11111111-1111-1111-1111-111111111111", ServerID: "22222222-2222-2222-2222-222222222222", UserID: "", OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberLeft, body)
+
+	if requeue {
+		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
+	}
+	if len(handler.leftCalls) != 0 {
+		t.Fatalf("handler no debería haber sido invocado con un user_id vacío")
+	}
+}
+
 func TestShouldRequeueOnTransientHandlerFailure(t *testing.T) {
 	handler := &membershipHandlerStub{joinedErr: errors.New("database unavailable")}
 	body := validPayloadJSON(t)
