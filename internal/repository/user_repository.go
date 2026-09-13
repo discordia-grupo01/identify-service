@@ -13,6 +13,12 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByID(ctx context.Context, userID string) (*model.User, error)
 	UpdateProfile(ctx context.Context, userID string, name string, description string, avatarURL string) error
+	// UpdateStatus aplica un merge atómico: un puntero nil deja esa columna
+	// sin tocar (COALESCE la conserva), un puntero no nil la fija a ese valor
+	// (incluida cadena vacía, para poder limpiarla). Evita el race condition
+	// de un read-modify-write hecho en aplicación. Devuelve el usuario ya
+	// actualizado, o nil si userID no existe.
+	UpdateStatus(ctx context.Context, userID string, statusText *string, statusEmoji *string) (*model.User, error)
 }
 
 func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error {
@@ -32,7 +38,7 @@ func NewUserRepository(db *sql.DB) UserRepository {
 }
 
 func (r *postgresUserRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
-	query := `SELECT id, name, email, description, avatar_url, password_hash, created_at, updated_at FROM users WHERE email = $1`
+	query := `SELECT id, name, email, description, avatar_url, status_text, status_emoji, password_hash, created_at, updated_at FROM users WHERE email = $1`
 	row := r.db.QueryRowContext(ctx, query, email)
 
 	u, err := scanUser(row)
@@ -47,7 +53,7 @@ func (r *postgresUserRepository) GetByEmail(ctx context.Context, email string) (
 
 func (r *postgresUserRepository) GetByID(ctx context.Context, userID string) (*model.User, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, email, description, avatar_url, password_hash, created_at, updated_at
+		SELECT id, name, email, description, avatar_url, status_text, status_emoji, password_hash, created_at, updated_at
 		FROM users WHERE id = $1`, userID)
 
 	u, err := scanUser(row)
@@ -82,6 +88,26 @@ func (r *postgresUserRepository) UpdateProfile(ctx context.Context, userID strin
 	return err
 }
 
+func (r *postgresUserRepository) UpdateStatus(ctx context.Context, userID string, statusText *string, statusEmoji *string) (*model.User, error) {
+	row := r.db.QueryRowContext(ctx, `
+		UPDATE users
+		SET status_text = COALESCE($1, status_text),
+		    status_emoji = COALESCE($2, status_emoji),
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = $3
+		RETURNING id, name, email, description, avatar_url, status_text, status_emoji, password_hash, created_at, updated_at`,
+		statusText, statusEmoji, userID)
+
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -94,6 +120,8 @@ func scanUser(row rowScanner) (*model.User, error) {
 		&user.Email,
 		&user.Description,
 		&user.AvatarURL,
+		&user.StatusText,
+		&user.StatusEmoji,
 		&user.PasswordHash,
 		&user.CreatedAt,
 		&user.UpdatedAt,

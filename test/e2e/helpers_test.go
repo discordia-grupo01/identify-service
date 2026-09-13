@@ -94,6 +94,8 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
 		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
 		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
 	}
 
 	return router

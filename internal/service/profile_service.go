@@ -23,6 +23,8 @@ const (
 	MaxProfileImageSide  = 4096
 	MaxDescriptionRunes  = 500
 	MaxNameRunes         = 100
+	MaxStatusTextRunes   = 128
+	MaxStatusEmojiBytes  = 32
 )
 
 var (
@@ -30,12 +32,17 @@ var (
 	ErrInvalidProfileDescription = errors.New("la descripción contiene caracteres inválidos o supera los 500 caracteres")
 	ErrInvalidProfileImage       = errors.New("la imagen debe ser JPEG, PNG o GIF, pesar hasta 5 MiB y tener dimensiones válidas")
 	ErrUserNotFound              = errors.New("el usuario no existe")
+	ErrNoStatusChanges           = errors.New("no hay cambios para guardar")
+	ErrInvalidStatusText         = errors.New("el texto del estado contiene caracteres de control o supera los 128 caracteres")
+	ErrInvalidStatusEmoji        = errors.New("el emoji del estado contiene caracteres de control o supera los 32 bytes")
 )
 
 type ProfileService interface {
 	Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error)
 	GetProfile(ctx context.Context, userID string) (*model.UserResponse, error)
 	GetPublicProfile(ctx context.Context, targetUserID string) (*model.PublicUserResponse, error)
+	UpdateStatus(ctx context.Context, userID string, request model.StatusUpdateRequest) (*model.UserResponse, error)
+	ClearStatus(ctx context.Context, userID string) error
 }
 
 type profileService struct {
@@ -67,6 +74,53 @@ func (s *profileService) GetPublicProfile(ctx context.Context, targetUserID stri
 		return nil, ErrUserNotFound
 	}
 	return model.NewPublicUserResponse(user), nil
+}
+
+func (s *profileService) UpdateStatus(ctx context.Context, userID string, request model.StatusUpdateRequest) (*model.UserResponse, error) {
+	if request.StatusText == nil && request.StatusEmoji == nil {
+		return nil, ErrNoStatusChanges
+	}
+
+	var statusText, statusEmoji *string
+	if request.StatusText != nil {
+		normalized, err := normalizeStatusText(*request.StatusText)
+		if err != nil {
+			return nil, err
+		}
+		statusText = &normalized
+	}
+	if request.StatusEmoji != nil {
+		normalized, err := normalizeStatusEmoji(*request.StatusEmoji)
+		if err != nil {
+			return nil, err
+		}
+		statusEmoji = &normalized
+	}
+
+	// Merge atómico en la base (UPDATE ... COALESCE ... RETURNING): un campo
+	// no enviado (nil acá) no pisa el valor actual, sin necesidad de leerlo
+	// primero. Evita el race condition de leer-modificar-escribir en
+	// aplicación cuando dos requests tocan campos distintos en paralelo.
+	user, err := s.repo.UpdateStatus(ctx, userID, statusText, statusEmoji)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return model.NewUserResponse(user), nil
+}
+
+func (s *profileService) ClearStatus(ctx context.Context, userID string) error {
+	empty := ""
+	user, err := s.repo.UpdateStatus(ctx, userID, &empty, &empty)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 func (s *profileService) Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error) {
@@ -152,6 +206,32 @@ func normalizeDescription(value string) (string, error) {
 		}
 	}
 	return strings.TrimSpace(value), nil
+}
+
+func normalizeStatusText(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > MaxStatusTextRunes {
+		return "", ErrInvalidStatusText
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return "", ErrInvalidStatusText
+		}
+	}
+	return value, nil
+}
+
+func normalizeStatusEmoji(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if !utf8.ValidString(value) || len(value) > MaxStatusEmojiBytes {
+		return "", ErrInvalidStatusEmoji
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return "", ErrInvalidStatusEmoji
+		}
+	}
+	return value, nil
 }
 
 func validateProfileImage(data []byte) (string, error) {

@@ -95,6 +95,22 @@ func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name str
 	return nil
 }
 
+func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusText *string, statusEmoji *string) (*model.User, error) {
+	if r.updateErr != nil {
+		return nil, r.updateErr
+	}
+	if r.existingUser == nil {
+		return nil, nil
+	}
+	if statusText != nil {
+		r.existingUser.StatusText = *statusText
+	}
+	if statusEmoji != nil {
+		r.existingUser.StatusEmoji = *statusEmoji
+	}
+	return r.existingUser, nil
+}
+
 func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 	repo := &userRepositoryStub{}
 	service := NewAuthService(repo)

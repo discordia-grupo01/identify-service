@@ -98,6 +98,8 @@ func main() {
 		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
 		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
 		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
 	}
 
 	addr := host + ":" + port

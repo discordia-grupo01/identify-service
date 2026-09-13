@@ -270,6 +270,160 @@ func TestProfileServicePropagatesRepositoryErrorForPublicProfile(t *testing.T) {
 	}
 }
 
+func TestProfileServiceUpdateStatusSetsBothFields(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	text := "Jugando"
+	emoji := "🎮"
+
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{
+		StatusText: &text, StatusEmoji: &emoji,
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if response.StatusText != "Jugando" || response.StatusEmoji != "🎮" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if repo.existingUser.StatusText != "Jugando" || repo.existingUser.StatusEmoji != "🎮" {
+		t.Fatalf("status was not persisted: %+v", repo.existingUser)
+	}
+}
+
+func TestProfileServiceUpdateStatusKeepsUntouchedField(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", StatusText: "Old text", StatusEmoji: "🎮"}}
+	newText := "New text"
+
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{
+		StatusText: &newText,
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if response.StatusText != "New text" || response.StatusEmoji != "🎮" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestProfileServiceUpdateStatusClearsFieldWithEmptyString(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", StatusText: "Old text", StatusEmoji: "🎮"}}
+	empty := ""
+
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{
+		StatusText: &empty,
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if response.StatusText != "" || response.StatusEmoji != "🎮" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestProfileServiceUpdateStatusClearsEmojiWithEmptyStringKeepingText(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", StatusText: "Old text", StatusEmoji: "🎮"}}
+	empty := ""
+
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{
+		StatusEmoji: &empty,
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if response.StatusText != "Old text" || response.StatusEmoji != "" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestProfileServiceUpdateStatusRejectsNoChanges(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id"}}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{})
+	if !errors.Is(err, ErrNoStatusChanges) {
+		t.Fatalf("UpdateStatus() error = %v, want %v", err, ErrNoStatusChanges)
+	}
+}
+
+func TestProfileServiceUpdateStatusRejectsInvalidData(t *testing.T) {
+	longTextValue := ""
+	for i := 0; i < MaxStatusTextRunes+1; i++ {
+		longTextValue += "a"
+	}
+	longEmojiValue := ""
+	for i := 0; i < MaxStatusEmojiBytes+1; i++ {
+		longEmojiValue += "a"
+	}
+	controlText := "hello\x00"
+	controlEmoji := "\x00"
+
+	tests := []struct {
+		name    string
+		request model.StatusUpdateRequest
+		want    error
+	}{
+		{name: "text too long", request: model.StatusUpdateRequest{StatusText: &longTextValue}, want: ErrInvalidStatusText},
+		{name: "text control character", request: model.StatusUpdateRequest{StatusText: &controlText}, want: ErrInvalidStatusText},
+		{name: "emoji too long", request: model.StatusUpdateRequest{StatusEmoji: &longEmojiValue}, want: ErrInvalidStatusEmoji},
+		{name: "emoji control character", request: model.StatusUpdateRequest{StatusEmoji: &controlEmoji}, want: ErrInvalidStatusEmoji},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id"}}
+			_, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", test.request)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("UpdateStatus() error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestProfileServiceUpdateStatusReturnsNotFoundForNonexistentUser(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	text := "Jugando"
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{StatusText: &text})
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("UpdateStatus() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
+func TestProfileServiceUpdateStatusPropagatesRepositoryError(t *testing.T) {
+	databaseErr := errors.New("database unavailable")
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id"}, updateErr: databaseErr}
+	text := "Jugando"
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).UpdateStatus(context.Background(), "user-id", model.StatusUpdateRequest{StatusText: &text})
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("UpdateStatus() error = %v, want %v", err, databaseErr)
+	}
+}
+
+func TestProfileServiceClearStatusClearsBothFields(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", StatusText: "Old text", StatusEmoji: "🎮"}}
+	if err := NewProfileService(repo, &profileImageStorageStub{}).ClearStatus(context.Background(), "user-id"); err != nil {
+		t.Fatalf("ClearStatus() error = %v", err)
+	}
+	if repo.existingUser.StatusText != "" || repo.existingUser.StatusEmoji != "" {
+		t.Fatalf("status was not cleared: %+v", repo.existingUser)
+	}
+}
+
+func TestProfileServiceClearStatusIsIdempotent(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id"}}
+	profile := NewProfileService(repo, &profileImageStorageStub{})
+	if err := profile.ClearStatus(context.Background(), "user-id"); err != nil {
+		t.Fatalf("ClearStatus() error = %v", err)
+	}
+	if err := profile.ClearStatus(context.Background(), "user-id"); err != nil {
+		t.Fatalf("ClearStatus() second call error = %v", err)
+	}
+}
+
+func TestProfileServiceClearStatusReturnsNotFoundForNonexistentUser(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	err := NewProfileService(repo, &profileImageStorageStub{}).ClearStatus(context.Background(), "user-id")
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("ClearStatus() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
 func TestProfileServiceReturnsProfile(t *testing.T) {
 	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", Description: "A profile", AvatarURL: "/avatar.png"}}
 	response, err := NewProfileService(repo, &profileImageStorageStub{}).GetProfile(context.Background(), "user-id")

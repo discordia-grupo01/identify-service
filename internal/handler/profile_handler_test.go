@@ -26,7 +26,9 @@ type profileServiceStub struct {
 	err            error
 	userID         string
 	request        model.ProfileUpdateRequest
+	statusRequest  model.StatusUpdateRequest
 	called         bool
+	clearCalled    bool
 }
 
 var _ service.ProfileService = (*profileServiceStub)(nil)
@@ -48,6 +50,20 @@ func (s *profileServiceStub) GetPublicProfile(_ context.Context, userID string) 
 	s.called = true
 	s.userID = userID
 	return s.publicResponse, s.err
+}
+
+func (s *profileServiceStub) UpdateStatus(_ context.Context, userID string, request model.StatusUpdateRequest) (*model.UserResponse, error) {
+	s.called = true
+	s.userID = userID
+	s.statusRequest = request
+	return s.response, s.err
+}
+
+func (s *profileServiceStub) ClearStatus(_ context.Context, userID string) error {
+	s.called = true
+	s.clearCalled = true
+	s.userID = userID
+	return s.err
 }
 
 func TestGetProfileHandlerReturnsProfile(t *testing.T) {
@@ -155,6 +171,135 @@ func performGetPublicProfileRequestWithoutUser(t *testing.T, profileService serv
 	router := gin.New()
 	router.GET("/v1/users/:id", func(c *gin.Context) {
 		NewProfileHandler(profileService).GetPublicProfile(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestUpdateStatusHandlerSetsStatus(t *testing.T) {
+	serviceStub := &profileServiceStub{response: &model.UserResponse{ID: "user-id", StatusText: "Jugando", StatusEmoji: "🎮"}}
+	recorder := performStatusPutRequest(t, serviceStub, "user-id", `{"status_text":"Jugando","status_emoji":"🎮"}`, true)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !serviceStub.called || serviceStub.userID != "user-id" {
+		t.Fatalf("service received user ID %q", serviceStub.userID)
+	}
+	if serviceStub.statusRequest.StatusText == nil || *serviceStub.statusRequest.StatusText != "Jugando" {
+		t.Fatalf("service received status_text = %v", serviceStub.statusRequest.StatusText)
+	}
+	if serviceStub.statusRequest.StatusEmoji == nil || *serviceStub.statusRequest.StatusEmoji != "🎮" {
+		t.Fatalf("service received status_emoji = %v", serviceStub.statusRequest.StatusEmoji)
+	}
+
+	var response model.UserResponse
+	decodeProfileJSON(t, recorder, &response)
+	if response.StatusText != "Jugando" || response.StatusEmoji != "🎮" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestUpdateStatusHandlerRejectsInvalidJSON(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performStatusPutRequest(t, serviceStub, "user-id", `not json`, true)
+
+	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_STATUS")
+	if serviceStub.called {
+		t.Fatal("service must not be called with an invalid JSON body")
+	}
+}
+
+func TestUpdateStatusHandlerMapsServiceErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "no changes", err: service.ErrNoStatusChanges, wantStatus: http.StatusBadRequest, wantCode: "INVALID_STATUS"},
+		{name: "invalid text", err: service.ErrInvalidStatusText, wantStatus: http.StatusBadRequest, wantCode: "INVALID_STATUS"},
+		{name: "invalid emoji", err: service.ErrInvalidStatusEmoji, wantStatus: http.StatusBadRequest, wantCode: "INVALID_STATUS"},
+		{name: "missing user", err: service.ErrUserNotFound, wantStatus: http.StatusNotFound, wantCode: "USER_NOT_FOUND"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &profileServiceStub{err: test.err}
+			recorder := performStatusPutRequest(t, serviceStub, "user-id", `{"status_text":"Jugando"}`, true)
+			assertProfileError(t, recorder, test.wantStatus, test.wantCode)
+		})
+	}
+}
+
+func TestUpdateStatusHandlerRejectsMissingAuthentication(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performStatusPutRequest(t, serviceStub, "user-id", `{"status_text":"Jugando"}`, false)
+
+	assertProfileError(t, recorder, http.StatusUnauthorized, "UNAUTHORIZED")
+	if serviceStub.called {
+		t.Fatal("service must not be called without authentication")
+	}
+}
+
+func TestDeleteStatusHandlerClearsStatus(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performStatusDeleteRequest(t, serviceStub, "user-id", true)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if !serviceStub.clearCalled || serviceStub.userID != "user-id" {
+		t.Fatalf("service did not clear status for user-id")
+	}
+}
+
+func TestDeleteStatusHandlerReturnsNotFound(t *testing.T) {
+	serviceStub := &profileServiceStub{err: service.ErrUserNotFound}
+	recorder := performStatusDeleteRequest(t, serviceStub, "user-id", true)
+
+	assertProfileError(t, recorder, http.StatusNotFound, "USER_NOT_FOUND")
+}
+
+func TestDeleteStatusHandlerRejectsMissingAuthentication(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performStatusDeleteRequest(t, serviceStub, "user-id", false)
+
+	assertProfileError(t, recorder, http.StatusUnauthorized, "UNAUTHORIZED")
+	if serviceStub.called {
+		t.Fatal("service must not be called without authentication")
+	}
+}
+
+func performStatusPutRequest(t *testing.T, profileService service.ProfileService, userID string, body string, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/v1/me/status", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	router := gin.New()
+	router.PUT("/v1/me/status", func(c *gin.Context) {
+		if authenticated {
+			c.Set(middleware.UserIDKey, userID)
+		}
+		NewProfileHandler(profileService).UpdateStatus(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performStatusDeleteRequest(t *testing.T, profileService service.ProfileService, userID string, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/v1/me/status", nil)
+	router := gin.New()
+	router.DELETE("/v1/me/status", func(c *gin.Context) {
+		if authenticated {
+			c.Set(middleware.UserIDKey, userID)
+		}
+		NewProfileHandler(profileService).DeleteStatus(c)
 	})
 	router.ServeHTTP(recorder, request)
 	return recorder

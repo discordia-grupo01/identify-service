@@ -160,3 +160,77 @@ func writeProfileInputError(c *gin.Context, err error) {
 		Message: err.Error(),
 	}})
 }
+
+func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+			Code:    "UNAUTHORIZED",
+			Message: "La sesión no es válida",
+		}})
+		return
+	}
+
+	var request model.StatusUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeStatusInputError(c, errors.New("el cuerpo de la petición no es un JSON válido"))
+		return
+	}
+
+	response, err := h.service.UpdateStatus(c.Request.Context(), userID.(string), request)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNoStatusChanges), errors.Is(err, service.ErrInvalidStatusText), errors.Is(err, service.ErrInvalidStatusEmoji):
+			writeStatusInputError(c, err)
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
+				Code:    "USER_NOT_FOUND",
+				Message: "El usuario no existe",
+			}})
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
+				Code:    "INTERNAL_SERVER_ERROR",
+				Message: "Ha ocurrido un error inesperado en el servidor",
+			}})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *ProfileHandler) DeleteStatus(c *gin.Context) {
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+			Code:    "UNAUTHORIZED",
+			Message: "La sesión no es válida",
+		}})
+		return
+	}
+
+	if err := h.service.ClearStatus(c.Request.Context(), userID.(string)); err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
+				Code:    "USER_NOT_FOUND",
+				Message: "El usuario no existe",
+			}})
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
+				Code:    "INTERNAL_SERVER_ERROR",
+				Message: "Ha ocurrido un error inesperado en el servidor",
+			}})
+		}
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func writeStatusInputError(c *gin.Context, err error) {
+	c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
+		Code:    "INVALID_STATUS",
+		Message: err.Error(),
+	}})
+}

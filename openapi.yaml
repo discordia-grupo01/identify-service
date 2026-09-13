@@ -145,6 +145,39 @@ paths:
         "401": { description: Sesión inválida o expirada }
         "404": { description: Usuario inexistente }
         "500": { description: Error interno }
+  /v1/me/status:
+    put:
+      summary: Fijar o actualizar el estado personalizado del usuario autenticado
+      description: Cada campo es independiente entre sí. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia. Al menos uno de los dos debe estar presente.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusUpdateRequest'
+      responses:
+        "200":
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "400": { description: JSON inválido, ningún campo presente, o texto/emoji inválido }
+        "401": { description: Sesión inválida o expirada }
+        "404": { description: Usuario inexistente }
+        "500": { description: Error interno }
+    delete:
+      summary: Limpiar el estado personalizado del usuario autenticado
+      description: Operación idempotente: borrar un estado ya vacío también responde 204.
+      security:
+        - bearerAuth: []
+      responses:
+        "204": { description: Estado limpiado }
+        "401": { description: Sesión inválida o expirada }
+        "404": { description: Usuario inexistente }
+        "500": { description: Error interno }
   /v1/users/{id}:
     get:
       summary: Obtener el perfil público de un usuario
@@ -261,6 +294,8 @@ components:
         email: { type: string, format: email }
         description: { type: string, maxLength: 500 }
         avatar_url: { type: string, format: uri }
+        status_text: { type: string, maxLength: 128 }
+        status_emoji: { type: string, maxLength: 32 }
         created_at: { type: string, format: date-time }
     PublicUserResponse:
       type: object
@@ -269,7 +304,21 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         avatar_url: { type: string, format: uri }
+        status_text: { type: string, maxLength: 128 }
+        status_emoji: { type: string, maxLength: 32 }
         created_at: { type: string, format: date-time }
+    StatusUpdateRequest:
+      type: object
+      description: Al menos uno de los dos campos debe estar presente. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia.
+      properties:
+        status_text:
+          type: string
+          maxLength: 128
+          description: Sin caracteres de control.
+        status_emoji:
+          type: string
+          maxLength: 32
+          description: Sin caracteres de control.
     ProfileUpdateRequest:
       type: object
       properties:
