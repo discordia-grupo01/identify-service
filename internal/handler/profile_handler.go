@@ -10,6 +10,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // const maxProfileImageBytes = 5 * 1024 * 1024 // 5 MiB
@@ -33,6 +34,43 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	}
 
 	user, err := h.service.GetProfile(c.Request.Context(), userID.(string))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
+				Code:    "USER_NOT_FOUND",
+				Message: "El usuario no existe",
+			}})
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
+				Code:    "INTERNAL_SERVER_ERROR",
+				Message: "Ha ocurrido un error inesperado en el servidor",
+			}})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
+	if _, exists := c.Get(middleware.UserIDKey); !exists {
+		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
+			Code:    "UNAUTHORIZED",
+			Message: "La sesión no es válida",
+		}})
+		return
+	}
+
+	targetUserID := c.Param("id")
+	if _, err := uuid.Parse(targetUserID); err != nil {
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
+			Code:    "INVALID_USER_ID",
+			Message: "El id de usuario no es válido",
+		}})
+		return
+	}
+
+	user, err := h.service.GetPublicProfile(c.Request.Context(), targetUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):

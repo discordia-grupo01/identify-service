@@ -35,6 +35,7 @@ var (
 type ProfileService interface {
 	Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error)
 	GetProfile(ctx context.Context, userID string) (*model.UserResponse, error)
+	GetPublicProfile(ctx context.Context, targetUserID string) (*model.PublicUserResponse, error)
 }
 
 type profileService struct {
@@ -55,6 +56,17 @@ func (s *profileService) GetProfile(ctx context.Context, userID string) (*model.
 		return nil, ErrUserNotFound
 	}
 	return model.NewUserResponse(user), nil
+}
+
+func (s *profileService) GetPublicProfile(ctx context.Context, targetUserID string) (*model.PublicUserResponse, error) {
+	user, err := s.repo.GetByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	return model.NewPublicUserResponse(user), nil
 }
 
 func (s *profileService) Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error) {

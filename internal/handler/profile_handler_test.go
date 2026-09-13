@@ -21,11 +21,12 @@ import (
 )
 
 type profileServiceStub struct {
-	response *model.UserResponse
-	err      error
-	userID   string
-	request  model.ProfileUpdateRequest
-	called   bool
+	response       *model.UserResponse
+	publicResponse *model.PublicUserResponse
+	err            error
+	userID         string
+	request        model.ProfileUpdateRequest
+	called         bool
 }
 
 var _ service.ProfileService = (*profileServiceStub)(nil)
@@ -41,6 +42,12 @@ func (s *profileServiceStub) GetProfile(_ context.Context, userID string) (*mode
 	s.called = true
 	s.userID = userID
 	return s.response, s.err
+}
+
+func (s *profileServiceStub) GetPublicProfile(_ context.Context, userID string) (*model.PublicUserResponse, error) {
+	s.called = true
+	s.userID = userID
+	return s.publicResponse, s.err
 }
 
 func TestGetProfileHandlerReturnsProfile(t *testing.T) {
@@ -79,6 +86,78 @@ func TestGetProfileHandlerReturnsUnauthorized(t *testing.T) {
 	if serviceStub.called {
 		t.Fatal("service must not be called without authentication")
 	}
+}
+
+func TestGetPublicProfileHandlerReturnsProfile(t *testing.T) {
+	serviceStub := &profileServiceStub{publicResponse: &model.PublicUserResponse{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "Ada Lovelace", AvatarURL: "/uploads/other.png"}}
+	recorder := performGetPublicProfileRequest(t, serviceStub, "caller-id", "550e8400-e29b-41d4-a716-446655440000")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.called || serviceStub.userID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("service received target id %q", serviceStub.userID)
+	}
+
+	var response model.PublicUserResponse
+	decodeProfileJSON(t, recorder, &response)
+	if response.Name != "Ada Lovelace" || response.AvatarURL != "/uploads/other.png" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestGetPublicProfileHandlerRejectsInvalidID(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performGetPublicProfileRequest(t, serviceStub, "caller-id", "not-a-uuid")
+
+	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_USER_ID")
+	if serviceStub.called {
+		t.Fatal("service must not be called with an invalid id")
+	}
+}
+
+func TestGetPublicProfileHandlerReturnsNotFound(t *testing.T) {
+	serviceStub := &profileServiceStub{err: service.ErrUserNotFound}
+	recorder := performGetPublicProfileRequest(t, serviceStub, "caller-id", "550e8400-e29b-41d4-a716-446655440000")
+
+	assertProfileError(t, recorder, http.StatusNotFound, "USER_NOT_FOUND")
+}
+
+func TestGetPublicProfileHandlerReturnsUnauthorized(t *testing.T) {
+	serviceStub := &profileServiceStub{}
+	recorder := performGetPublicProfileRequestWithoutUser(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000")
+
+	assertProfileError(t, recorder, http.StatusUnauthorized, "UNAUTHORIZED")
+	if serviceStub.called {
+		t.Fatal("service must not be called without authentication")
+	}
+}
+
+func performGetPublicProfileRequest(t *testing.T, profileService service.ProfileService, callerID string, targetID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/users/"+targetID, nil)
+	router := gin.New()
+	router.GET("/v1/users/:id", func(c *gin.Context) {
+		c.Set(middleware.UserIDKey, callerID)
+		NewProfileHandler(profileService).GetPublicProfile(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performGetPublicProfileRequestWithoutUser(t *testing.T, profileService service.ProfileService, targetID string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/users/"+targetID, nil)
+	router := gin.New()
+	router.GET("/v1/users/:id", func(c *gin.Context) {
+		NewProfileHandler(profileService).GetPublicProfile(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func TestProfileHandlerUpdatesProfileFromMultipartRequest(t *testing.T) {

@@ -44,6 +44,13 @@ type UserResponse struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type PublicUserResponse struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	AvatarURL string    `json:"avatar_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ProfileUpdateRequest struct {
 	Name             *string
 	Description      *string
@@ -60,5 +67,14 @@ func NewUserResponse(user *User) *UserResponse {
 		Description: user.Description,
 		AvatarURL:   user.AvatarURL,
 		CreatedAt:   user.CreatedAt.UTC(),
+	}
+}
+
+func NewPublicUserResponse(user *User) *PublicUserResponse {
+	return &PublicUserResponse{
+		ID:        user.ID,
+		Name:      user.Name,
+		AvatarURL: user.AvatarURL,
+		CreatedAt: user.CreatedAt.UTC(),
 	}
 }

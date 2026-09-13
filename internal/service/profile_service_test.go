@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"testing"
+	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 )
@@ -234,6 +235,38 @@ func TestProfileServiceReturnsNotFoundForGetProfile(t *testing.T) {
 	_, err := NewProfileService(repo, &profileImageStorageStub{}).GetProfile(context.Background(), "user-id")
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("GetProfile() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
+func TestProfileServiceReturnsPublicProfile(t *testing.T) {
+	createdAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID: "user-id", Name: "Ada", Email: "ada@example.com", Description: "A profile",
+		AvatarURL: "/avatar.png", CreatedAt: createdAt,
+	}}
+	response, err := NewProfileService(repo, &profileImageStorageStub{}).GetPublicProfile(context.Background(), "user-id")
+	if err != nil {
+		t.Fatalf("GetPublicProfile() error = %v", err)
+	}
+	if response.ID != "user-id" || response.Name != "Ada" || response.AvatarURL != "/avatar.png" || !response.CreatedAt.Equal(createdAt) {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestProfileServiceReturnsNotFoundForPublicProfile(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).GetPublicProfile(context.Background(), "user-id")
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("GetPublicProfile() error = %v, want %v", err, ErrUserNotFound)
+	}
+}
+
+func TestProfileServicePropagatesRepositoryErrorForPublicProfile(t *testing.T) {
+	databaseErr := errors.New("database unavailable")
+	repo := &userRepositoryStub{getErr: databaseErr}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}).GetPublicProfile(context.Background(), "user-id")
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("GetPublicProfile() error = %v, want %v", err, databaseErr)
 	}
 }
 

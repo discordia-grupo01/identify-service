@@ -86,6 +86,14 @@ make test
 ```
 Cobertura minima: 70% (requisito del proyecto).
 
+Los tests en `test/e2e/` son de punta a punta: arman el router real (repos, servicios y handlers reales) contra un Postgres real, sin stubs. Se saltean automaticamente si no hay `DATABASE_HOST` seteado. Para correrlos:
+```bash
+docker compose up -d db
+make migrate
+DATABASE_HOST=localhost DATABASE_PORT=5432 DATABASE_USER=discordia DATABASE_PASSWORD=discordia DATABASE_NAME=discordia_servicio \
+  go test ./test/e2e/... -v
+```
+
 ## Supabase (produccion)
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
 
@@ -114,6 +122,7 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
 - `GET /v1/me/profile` - Envia informacion del usuario. Requiere Bearer JWT del mismo
+- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, created_at; sin email ni description). Requiere Bearer JWT.
 
 Ver `openapi.yaml` para el detalle de cada request/response.
 
