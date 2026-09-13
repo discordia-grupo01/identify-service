@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -61,6 +62,15 @@ func main() {
 	profileService := service.NewProfileService(userRepo, profileImageStorage)
 	profileHandler := handler.NewProfileHandler(profileService)
 	router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
+
+	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
+		membershipRepo := repository.NewServerMembershipRepository(dbConnection)
+		membershipHandler := events.NewMembershipHandler(membershipRepo)
+		consumer := events.NewConsumer(rabbitMQURL, membershipHandler)
+		go consumer.Start(context.Background())
+	} else {
+		log.Println("RABBITMQ_URL no configurada: el consumer de membership no se inicia")
+	}
 
 	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
 	router.GET("/livez", func(c *gin.Context) {
