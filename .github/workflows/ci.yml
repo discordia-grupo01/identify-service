@@ -21,6 +21,14 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_HOST: localhost
       DATABASE_PORT: 5432
@@ -29,6 +37,7 @@ jobs:
       DATABASE_NAME: discordia_servicio
       DATABASE_SSLMODE: disable
       JWT_SECRET: ci-test-secret
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
