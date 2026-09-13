@@ -40,18 +40,19 @@ var (
 type ProfileService interface {
 	Update(ctx context.Context, userID string, request model.ProfileUpdateRequest) (*model.UserResponse, error)
 	GetProfile(ctx context.Context, userID string) (*model.UserResponse, error)
-	GetPublicProfile(ctx context.Context, targetUserID string) (*model.PublicUserResponse, error)
+	GetPublicProfile(ctx context.Context, viewerUserID string, targetUserID string) (*model.PublicUserResponse, error)
 	UpdateStatus(ctx context.Context, userID string, request model.StatusUpdateRequest) (*model.UserResponse, error)
 	ClearStatus(ctx context.Context, userID string) error
 }
 
 type profileService struct {
-	repo    repository.UserRepository
-	storage profileimage.Storage
+	repo           repository.UserRepository
+	storage        profileimage.Storage
+	membershipRepo repository.ServerMembershipRepository
 }
 
-func NewProfileService(repo repository.UserRepository, storage profileimage.Storage) ProfileService {
-	return &profileService{repo: repo, storage: storage}
+func NewProfileService(repo repository.UserRepository, storage profileimage.Storage, membershipRepo repository.ServerMembershipRepository) ProfileService {
+	return &profileService{repo: repo, storage: storage, membershipRepo: membershipRepo}
 }
 
 func (s *profileService) GetProfile(ctx context.Context, userID string) (*model.UserResponse, error) {
@@ -65,7 +66,7 @@ func (s *profileService) GetProfile(ctx context.Context, userID string) (*model.
 	return model.NewUserResponse(user), nil
 }
 
-func (s *profileService) GetPublicProfile(ctx context.Context, targetUserID string) (*model.PublicUserResponse, error) {
+func (s *profileService) GetPublicProfile(ctx context.Context, viewerUserID string, targetUserID string) (*model.PublicUserResponse, error) {
 	user, err := s.repo.GetByID(ctx, targetUserID)
 	if err != nil {
 		return nil, err
@@ -73,7 +74,18 @@ func (s *profileService) GetPublicProfile(ctx context.Context, targetUserID stri
 	if user == nil {
 		return nil, ErrUserNotFound
 	}
-	return model.NewPublicUserResponse(user), nil
+	response := model.NewPublicUserResponse(user)
+
+	// Compararse con uno mismo no tiene sentido; se evita además una consulta
+	// innecesaria al repositorio de membresías.
+	if viewerUserID != targetUserID {
+		mutualServerIDs, err := s.membershipRepo.ListMutualServerIDs(ctx, viewerUserID, targetUserID)
+		if err != nil {
+			return nil, err
+		}
+		response.MutualServerIDs = mutualServerIDs
+	}
+	return response, nil
 }
 
 func (s *profileService) UpdateStatus(ctx context.Context, userID string, request model.StatusUpdateRequest) (*model.UserResponse, error) {

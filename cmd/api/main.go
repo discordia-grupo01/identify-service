@@ -59,12 +59,15 @@ func main() {
 		getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"),
 		getEnv("PROFILE_IMAGE_URL", "/uploads/profile-images"),
 	)
-	profileService := service.NewProfileService(userRepo, profileImageStorage)
+	membershipRepo := repository.NewServerMembershipRepository(dbConnection)
+	profileService := service.NewProfileService(userRepo, profileImageStorage, membershipRepo)
 	profileHandler := handler.NewProfileHandler(profileService)
 	router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
 
+	// El consumer de RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un
+	// entorno sin la dependencia levantada) el resto del servicio sigue
+	// funcionando normalmente, solo sin "servidores en común" actualizados.
 	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
-		membershipRepo := repository.NewServerMembershipRepository(dbConnection)
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
 		consumer := events.NewConsumer(rabbitMQURL, membershipHandler)
 		go consumer.Start(context.Background())

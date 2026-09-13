@@ -299,7 +299,7 @@ components:
         created_at: { type: string, format: date-time }
     PublicUserResponse:
       type: object
-      required: [id, name, avatar_url, created_at]
+      required: [id, name, avatar_url, created_at, mutual_server_ids]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -307,6 +307,10 @@ components:
         status_text: { type: string, maxLength: 128 }
         status_emoji: { type: string, maxLength: 32 }
         created_at: { type: string, format: date-time }
+        mutual_server_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: IDs de los servidores que el usuario autenticado (viewer) comparte con este usuario. No incluye nombre ni ícono del servidor (se resuelven aparte contra discordia-servers). Vacío si no comparten ninguno o si viewer == target.
     StatusUpdateRequest:
       type: object
       description: Al menos uno de los dos campos debe estar presente. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia.

@@ -25,6 +25,7 @@ type profileServiceStub struct {
 	publicResponse *model.PublicUserResponse
 	err            error
 	userID         string
+	viewerUserID   string
 	request        model.ProfileUpdateRequest
 	statusRequest  model.StatusUpdateRequest
 	called         bool
@@ -46,8 +47,9 @@ func (s *profileServiceStub) GetProfile(_ context.Context, userID string) (*mode
 	return s.response, s.err
 }
 
-func (s *profileServiceStub) GetPublicProfile(_ context.Context, userID string) (*model.PublicUserResponse, error) {
+func (s *profileServiceStub) GetPublicProfile(_ context.Context, viewerUserID string, userID string) (*model.PublicUserResponse, error) {
 	s.called = true
+	s.viewerUserID = viewerUserID
 	s.userID = userID
 	return s.publicResponse, s.err
 }
@@ -113,6 +115,9 @@ func TestGetPublicProfileHandlerReturnsProfile(t *testing.T) {
 	}
 	if !serviceStub.called || serviceStub.userID != "550e8400-e29b-41d4-a716-446655440000" {
 		t.Fatalf("service received target id %q", serviceStub.userID)
+	}
+	if serviceStub.viewerUserID != "caller-id" {
+		t.Fatalf("service received viewer id %q, want caller-id", serviceStub.viewerUserID)
 	}
 
 	var response model.PublicUserResponse

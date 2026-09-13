@@ -53,7 +53,8 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 }
 
 func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
-	if _, exists := c.Get(middleware.UserIDKey); !exists {
+	viewerUserID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
 		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
 			Code:    "UNAUTHORIZED",
 			Message: "La sesión no es válida",
@@ -70,7 +71,7 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.service.GetPublicProfile(c.Request.Context(), targetUserID)
+	user, err := h.service.GetPublicProfile(c.Request.Context(), viewerUserID.(string), targetUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):

@@ -52,11 +52,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE sessions, users RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE sessions, users, server_memberships RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec(`TRUNCATE TABLE sessions, users RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE sessions, users, server_memberships RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 
@@ -84,7 +84,8 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	authHandler := handler.NewAuthHandler(authService)
 
 	profileStorage := profileimage.NewLocalStorage(t.TempDir(), "/uploads/profile-images")
-	profileService := service.NewProfileService(userRepo, profileStorage)
+	membershipRepo := repository.NewServerMembershipRepository(db)
+	profileService := service.NewProfileService(userRepo, profileStorage, membershipRepo)
 	profileHandler := handler.NewProfileHandler(profileService)
 
 	api := router.Group("/v1")

@@ -57,6 +57,8 @@ type PublicUserResponse struct {
 	StatusText  string    `json:"status_text"`
 	StatusEmoji string    `json:"status_emoji"`
 	CreatedAt   time.Time `json:"created_at"`
+
+	MutualServerIDs []string `json:"mutual_server_ids"`
 }
 
 type ProfileUpdateRequest struct {
@@ -89,11 +91,12 @@ func NewUserResponse(user *User) *UserResponse {
 
 func NewPublicUserResponse(user *User) *PublicUserResponse {
 	return &PublicUserResponse{
-		ID:          user.ID,
-		Name:        user.Name,
-		AvatarURL:   user.AvatarURL,
-		StatusText:  user.StatusText,
-		StatusEmoji: user.StatusEmoji,
-		CreatedAt:   user.CreatedAt.UTC(),
+		ID:              user.ID,
+		Name:            user.Name,
+		AvatarURL:       user.AvatarURL,
+		StatusText:      user.StatusText,
+		StatusEmoji:     user.StatusEmoji,
+		CreatedAt:       user.CreatedAt.UTC(),
+		MutualServerIDs: []string{},
 	}
 }
