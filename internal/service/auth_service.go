@@ -179,14 +179,6 @@ func generateRefreshToken() (plain string, hash string, err error) {
 	return plain, hashToken(plain), nil
 }
 
-func newTokenID() (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(value), nil
-}
-
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
