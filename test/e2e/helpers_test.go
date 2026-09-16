@@ -78,7 +78,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	router := gin.New()
 
 	userRepo := repository.NewUserRepository(db)
-	sessionRepo := repository.NewSessionRepository(db)
+	sessionRepo := repository.NewRefreshTokenRepository(db)
 
 	authService := service.NewAuthService(userRepo, sessionRepo)
 	authHandler := handler.NewAuthHandler(authService)
@@ -92,11 +92,11 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
-		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
-		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
-		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
-		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
-		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
+		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
+		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
+		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
 	}
 
 	return router

@@ -10,21 +10,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type authServiceStub struct {
-	response     *model.AuthResponse
-	registerUser *model.UserResponse
-	err          error
-	request      model.RegisterRequest
-	loginRequest model.LoginRequest
-	called       bool
-	logoutCalled bool
-	logoutToken  string
+	response      *model.AuthResponse
+	registerUser  *model.UserResponse
+	err           error
+	request       model.RegisterRequest
+	loginRequest  model.LoginRequest
+	called        bool
+	logoutCalled  bool
+	logoutToken   string
+	refreshCalled bool
+	refreshToken  string
 }
 
 var _ service.AuthService = (*authServiceStub)(nil)
@@ -41,9 +42,15 @@ func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (
 	return s.response, s.err
 }
 
-func (s *authServiceStub) Logout(_ context.Context, tokenID string) error {
+func (s *authServiceStub) Refresh(_ context.Context, refreshToken string) (*model.AuthResponse, error) {
+	s.refreshCalled = true
+	s.refreshToken = refreshToken
+	return s.response, s.err
+}
+
+func (s *authServiceStub) Logout(_ context.Context, refreshToken string) error {
 	s.logoutCalled = true
-	s.logoutToken = tokenID
+	s.logoutToken = refreshToken
 	return s.err
 }
 
@@ -135,8 +142,11 @@ func TestAuthHandlerRegisterMapsBusinessErrors(t *testing.T) {
 	}
 }
 
-func TestAuthHandlerLoginReturnsToken(t *testing.T) {
-	serviceStub := &authServiceStub{response: &model.AuthResponse{Token: "signed-token"}}
+func TestAuthHandlerLoginSetsRefreshCookieAndReturnsToken(t *testing.T) {
+	serviceStub := &authServiceStub{response: &model.AuthResponse{
+		Token:        "signed-access-token",
+		RefreshToken: "plain-refresh-token",
+	}}
 	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Secure123"}`)
 
 	if recorder.Code != http.StatusOK {
@@ -144,6 +154,23 @@ func TestAuthHandlerLoginReturnsToken(t *testing.T) {
 	}
 	if !serviceStub.called || serviceStub.loginRequest.Email != "ada@example.com" {
 		t.Fatalf("service received unexpected login request: %+v", serviceStub.loginRequest)
+	}
+
+	cookie := findCookie(t, recorder, "refresh_token")
+	if cookie.Value != "plain-refresh-token" {
+		t.Fatalf("refresh_token cookie = %q, want plain-refresh-token", cookie.Value)
+	}
+	if !cookie.HttpOnly || !cookie.Secure {
+		t.Fatal("refresh_token cookie must be HttpOnly and Secure")
+	}
+
+	var response model.AuthResponse
+	decodeJSON(t, recorder, &response)
+	if response.RefreshToken != "" {
+		t.Fatal("refresh token must never be returned in the response body")
+	}
+	if response.Token != "signed-access-token" {
+		t.Fatalf("access token = %q, want signed-access-token", response.Token)
 	}
 }
 
@@ -199,9 +226,100 @@ func TestAuthHandlerLoginRejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
-func TestAuthHandlerLogoutRevokesCurrentSession(t *testing.T) {
+func TestAuthHandlerRefreshRotatesRefreshCookie(t *testing.T) {
+	serviceStub := &authServiceStub{response: &model.AuthResponse{
+		Token:        "new-access-token",
+		RefreshToken: "new-refresh-token",
+	}}
+	recorder := performRefreshRequest(t, serviceStub, "old-refresh-token")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.refreshCalled || serviceStub.refreshToken != "old-refresh-token" {
+		t.Fatalf("service received unexpected refresh token: %+v", serviceStub)
+	}
+
+	cookie := findCookie(t, recorder, "refresh_token")
+	if cookie.Value != "new-refresh-token" {
+		t.Fatalf("refresh_token cookie = %q, want new-refresh-token", cookie.Value)
+	}
+
+	var response model.AuthResponse
+	decodeJSON(t, recorder, &response)
+	if response.RefreshToken != "" {
+		t.Fatal("refresh token must never be returned in the response body")
+	}
+	if response.Token != "new-access-token" {
+		t.Fatalf("access token = %q, want new-access-token", response.Token)
+	}
+}
+
+func TestAuthHandlerRefreshRejectsMissingCookie(t *testing.T) {
 	serviceStub := &authServiceStub{}
-	recorder := performLogoutRequest(t, serviceStub, "session-token")
+	recorder := performRefreshRequest(t, serviceStub, "")
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	if serviceStub.refreshCalled {
+		t.Fatal("service Refresh() must not be called without a refresh token")
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "SESSION_EXPIRED" {
+		t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
+	}
+}
+
+func TestAuthHandlerRefreshMapsInvalidOrReusedToken(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "invalid token", err: service.ErrInvalidRefreshToken},
+		{name: "reused token", err: service.ErrRefreshReused},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &authServiceStub{err: test.err}
+			recorder := performRefreshRequest(t, serviceStub, "stale-refresh-token")
+
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+			}
+			var response model.ErrorResponse
+			decodeJSON(t, recorder, &response)
+			if response.Error.Code != "SESSION_EXPIRED" {
+				t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
+			}
+
+			cookie := findCookie(t, recorder, "refresh_token")
+			if cookie.Value != "" || cookie.MaxAge >= 0 {
+				t.Fatalf("refresh_token cookie must be cleared, got %+v", cookie)
+			}
+		})
+	}
+}
+
+func TestAuthHandlerRefreshMapsUnexpectedError(t *testing.T) {
+	serviceStub := &authServiceStub{err: errors.New("database unavailable")}
+	recorder := performRefreshRequest(t, serviceStub, "stale-refresh-token")
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INTERNAL_SERVER_ERROR" {
+		t.Fatalf("error code = %q, want INTERNAL_SERVER_ERROR", response.Error.Code)
+	}
+}
+
+func TestAuthHandlerLogoutRevokesRefreshTokenAndClearsCookie(t *testing.T) {
+	serviceStub := &authServiceStub{}
+	recorder := performLogoutRequest(t, serviceStub, "plain-refresh-token")
 
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
@@ -209,12 +327,17 @@ func TestAuthHandlerLogoutRevokesCurrentSession(t *testing.T) {
 	if !serviceStub.logoutCalled {
 		t.Fatal("service Logout() was not called")
 	}
-	if serviceStub.logoutToken != "session-token" {
-		t.Fatalf("Logout() token = %q, want session-token", serviceStub.logoutToken)
+	if serviceStub.logoutToken != "plain-refresh-token" {
+		t.Fatalf("Logout() token = %q, want plain-refresh-token", serviceStub.logoutToken)
+	}
+
+	cookie := findCookie(t, recorder, "refresh_token")
+	if cookie.Value != "" || cookie.MaxAge >= 0 {
+		t.Fatalf("refresh_token cookie must be cleared, got %+v", cookie)
 	}
 }
 
-func TestAuthHandlerLogoutRejectsMissingSessionContext(t *testing.T) {
+func TestAuthHandlerLogoutRejectsMissingCookie(t *testing.T) {
 	serviceStub := &authServiceStub{}
 	recorder := performLogoutRequest(t, serviceStub, "")
 
@@ -227,7 +350,7 @@ func TestAuthHandlerLogoutRejectsMissingSessionContext(t *testing.T) {
 		t.Fatalf("error code = %q, want UNAUTHORIZED", response.Error.Code)
 	}
 	if serviceStub.logoutCalled {
-		t.Fatal("service Logout() must not be called without a session")
+		t.Fatal("service Logout() must not be called without a refresh token")
 	}
 }
 
@@ -247,7 +370,7 @@ func TestAuthHandlerLogoutMapsExpiredOrRevokedSession(t *testing.T) {
 
 func TestAuthHandlerLogoutMapsUnexpectedServiceError(t *testing.T) {
 	serviceStub := &authServiceStub{err: errors.New("database unavailable")}
-	recorder := performLogoutRequest(t, serviceStub, "session-token")
+	recorder := performLogoutRequest(t, serviceStub, "plain-refresh-token")
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
@@ -285,21 +408,45 @@ func performLoginRequest(t *testing.T, authService service.AuthService, body str
 	return recorder
 }
 
-func performLogoutRequest(t *testing.T, authService service.AuthService, tokenID string) *httptest.ResponseRecorder {
+func performRefreshRequest(t *testing.T, authService service.AuthService, refreshToken string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/refresh", nil)
+	if refreshToken != "" {
+		request.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
+	}
+
+	router := gin.New()
+	router.POST("/v1/auth/refresh", NewAuthHandler(authService).Refresh)
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performLogoutRequest(t *testing.T, authService service.AuthService, refreshToken string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/logout", nil)
+	if refreshToken != "" {
+		request.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
+	}
 
 	router := gin.New()
-	router.POST("/v1/logout", func(c *gin.Context) {
-		if tokenID != "" {
-			c.Set(middleware.TokenIDKey, tokenID)
-		}
-		NewAuthHandler(authService).Logout(c)
-	})
+	router.POST("/v1/logout", NewAuthHandler(authService).Logout)
 	router.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func findCookie(t *testing.T, recorder *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("cookie %q not set", name)
+	return nil
 }
 
 func jsonBody(body string) *bytes.Buffer {
