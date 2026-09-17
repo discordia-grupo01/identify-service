@@ -48,16 +48,18 @@ type UserResponse struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// PublicUserResponse es la vista de un usuario visible para terceros: nunca
-// incluye email, que es un dato propio del usuario.
+// PublicUserResponse es la vista de un usuario visible para terceros: solo
+// los campos que la US de "Visualización de perfil público" lista como
+// públicos (nombre, foto, descripción, estado y servidores en común). Nunca
+// incluye email (dato propio) ni fecha de registro (esa sí es propia del
+// perfil propio, no de la lista pública).
 type PublicUserResponse struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	AvatarURL   string    `json:"avatar_url"`
-	StatusText  string    `json:"status_text"`
-	StatusEmoji string    `json:"status_emoji"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	AvatarURL   string `json:"avatar_url"`
+	StatusText  string `json:"status_text"`
+	StatusEmoji string `json:"status_emoji"`
 
 	MutualServerIDs []string `json:"mutual_server_ids"`
 }
@@ -98,7 +100,6 @@ func NewPublicUserResponse(user *User) *PublicUserResponse {
 		AvatarURL:       user.AvatarURL,
 		StatusText:      user.StatusText,
 		StatusEmoji:     user.StatusEmoji,
-		CreatedAt:       user.CreatedAt.UTC(),
 		MutualServerIDs: []string{},
 	}
 }
