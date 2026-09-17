@@ -267,7 +267,7 @@ func TestProfileServiceReturnsPublicProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPublicProfile() error = %v", err)
 	}
-	if response.ID != "user-id" || response.Name != "Ada" || response.AvatarURL != "/avatar.png" || !response.CreatedAt.Equal(createdAt) {
+	if response.ID != "user-id" || response.Name != "Ada" || response.Description != "A profile" || response.AvatarURL != "/avatar.png" || !response.CreatedAt.Equal(createdAt) {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }

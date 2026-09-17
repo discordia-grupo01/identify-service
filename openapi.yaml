@@ -181,7 +181,7 @@ paths:
   /v1/users/{id}:
     get:
       summary: Obtener el perfil público de un usuario
-      description: Devuelve los campos públicos del usuario indicado (nombre, avatar, fecha de registro). No incluye email ni descripción.
+      description: Devuelve los campos públicos del usuario indicado (nombre, descripción, avatar, estado, fecha de registro). No incluye email.
       security:
         - bearerAuth: []
       parameters:
@@ -303,6 +303,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
+        description: { type: string, maxLength: 500 }
         avatar_url: { type: string, format: uri }
         status_text: { type: string, maxLength: 128 }
         status_emoji: { type: string, maxLength: 32 }

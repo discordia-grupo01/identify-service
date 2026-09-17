@@ -49,10 +49,11 @@ type UserResponse struct {
 }
 
 // PublicUserResponse es la vista de un usuario visible para terceros: nunca
-// incluye email ni description, que son datos propios del usuario.
+// incluye email, que es un dato propio del usuario.
 type PublicUserResponse struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Description string    `json:"description"`
 	AvatarURL   string    `json:"avatar_url"`
 	StatusText  string    `json:"status_text"`
 	StatusEmoji string    `json:"status_emoji"`
@@ -93,6 +94,7 @@ func NewPublicUserResponse(user *User) *PublicUserResponse {
 	return &PublicUserResponse{
 		ID:              user.ID,
 		Name:            user.Name,
+		Description:     user.Description,
 		AvatarURL:       user.AvatarURL,
 		StatusText:      user.StatusText,
 		StatusEmoji:     user.StatusEmoji,
