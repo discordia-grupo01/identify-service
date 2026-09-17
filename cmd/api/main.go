@@ -13,6 +13,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
+	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,10 @@ func main() {
 	passwordRecoveryRepo := repository.NewPostgresPasswordRecoveryRepository(dbConnection)
 	authService := service.NewAuthService(userRepo, refreshRepo)
 	authHandler := handler.NewAuthHandler(authService)
+	oauthIdentityRepo := repository.NewOAuthIdentityRepository(dbConnection)
+	googleVerifier := googleoauth.NewVerifier(getEnv("GOOGLE_CLIENT_ID", ""))
+	oauthService := service.NewOAuthService(userRepo, oauthIdentityRepo, refreshRepo, googleVerifier)
+	oauthHandler := handler.NewOAuthHandler(oauthService)
 	emailConfig, err := emailutil.ConfigFromEnv()
 	if err != nil {
 		log.Fatalf("invalid email configuration: %v", err)
@@ -105,6 +110,7 @@ func main() {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
+		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
 		api.POST("/refresh", authHandler.Refresh)
 		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
