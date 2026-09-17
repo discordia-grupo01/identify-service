@@ -41,8 +41,8 @@ func TestPublicProfileEndToEnd(t *testing.T) {
 		if _, hasEmail := rawBody["email"]; hasEmail {
 			t.Fatal("public profile must not expose email")
 		}
-		if _, hasDescription := rawBody["description"]; hasDescription {
-			t.Fatal("public profile must not expose description")
+		if _, hasCreatedAt := rawBody["created_at"]; hasCreatedAt {
+			t.Fatal("public profile must not expose created_at")
 		}
 	})
 
