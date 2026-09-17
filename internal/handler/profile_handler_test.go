@@ -107,7 +107,7 @@ func TestGetProfileHandlerReturnsUnauthorized(t *testing.T) {
 }
 
 func TestGetPublicProfileHandlerReturnsProfile(t *testing.T) {
-	serviceStub := &profileServiceStub{publicResponse: &model.PublicUserResponse{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "Ada Lovelace", AvatarURL: "/uploads/other.png"}}
+	serviceStub := &profileServiceStub{publicResponse: &model.PublicUserResponse{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "Ada Lovelace", Description: "Loves math", AvatarURL: "/uploads/other.png"}}
 	recorder := performGetPublicProfileRequest(t, serviceStub, "caller-id", "550e8400-e29b-41d4-a716-446655440000")
 
 	if recorder.Code != http.StatusOK {
@@ -122,7 +122,7 @@ func TestGetPublicProfileHandlerReturnsProfile(t *testing.T) {
 
 	var response model.PublicUserResponse
 	decodeProfileJSON(t, recorder, &response)
-	if response.Name != "Ada Lovelace" || response.AvatarURL != "/uploads/other.png" {
+	if response.Name != "Ada Lovelace" || response.Description != "Loves math" || response.AvatarURL != "/uploads/other.png" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }

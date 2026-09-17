@@ -23,7 +23,7 @@ const (
 	MaxProfileImageSide  = 4096
 	MaxDescriptionRunes  = 500
 	MaxNameRunes         = 100
-	MaxStatusTextRunes   = 128
+	MaxStatusTextRunes   = 64
 	MaxStatusEmojiBytes  = 32
 )
 
@@ -33,7 +33,7 @@ var (
 	ErrInvalidProfileImage       = errors.New("la imagen debe ser JPEG, PNG o GIF, pesar hasta 5 MiB y tener dimensiones válidas")
 	ErrUserNotFound              = errors.New("el usuario no existe")
 	ErrNoStatusChanges           = errors.New("no hay cambios para guardar")
-	ErrInvalidStatusText         = errors.New("el texto del estado contiene caracteres de control o supera los 128 caracteres")
+	ErrInvalidStatusText         = errors.New("el texto del estado contiene caracteres de control o supera los 64 caracteres")
 	ErrInvalidStatusEmoji        = errors.New("el emoji del estado contiene caracteres de control o supera los 32 bytes")
 )
 
