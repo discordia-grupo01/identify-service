@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -76,7 +77,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 		ID:           uuid.NewString(),
 		Name:         req.Name,
 		Email:        req.Email,
-		PasswordHash: string(hashedPassword),
+		PasswordHash: sql.NullString{String: string(hashedPassword), Valid: true},
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
@@ -94,7 +95,7 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -185,6 +186,14 @@ func hashToken(token string) string {
 }
 
 func (s *authService) issueTokenPair(ctx context.Context, user *model.User, familyID string) (*model.AuthResponse, error) {
+	return issueTokenPair(ctx, s.refreshRepo, user, familyID)
+}
+
+// issueTokenPair emite el par de tokens (access JWT + refresh token opaco) y
+// persiste el refresh token. Es compartida por authService y oauthService
+// para que el mecanismo de sesion (misma cookie, misma rotacion) sea
+// identico sin importar como se autentico el usuario.
+func issueTokenPair(ctx context.Context, refreshRepo repository.RefreshTokenRepository, user *model.User, familyID string) (*model.AuthResponse, error) {
 	accessToken, err := generateAccessJWT(user.ID)
 	if err != nil {
 		return nil, err
@@ -196,7 +205,7 @@ func (s *authService) issueTokenPair(ctx context.Context, user *model.User, fami
 	}
 
 	expiresAt := time.Now().Add(RefreshTokenTTL)
-	if err := s.refreshRepo.Create(ctx, refreshHash, user.ID, familyID, expiresAt); err != nil {
+	if err := refreshRepo.Create(ctx, refreshHash, user.ID, familyID, expiresAt); err != nil {
 		return nil, err
 	}
 
