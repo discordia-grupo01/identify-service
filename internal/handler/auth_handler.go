@@ -4,11 +4,15 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	refreshCookieName = "refresh_token"
+	refreshCookiePath = "/v1/auth"
 )
 
 type AuthHandler struct {
@@ -108,12 +112,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	setRefreshCookie(c, res.RefreshToken)
+	res.RefreshToken = ""
 	c.JSON(http.StatusOK, res)
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	tokenID, exists := c.Get(middleware.TokenIDKey)
-	if !exists {
+	refreshToken, err := c.Cookie(refreshCookieName)
+	if err != nil || refreshToken == "" {
 		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
 			Code:    "UNAUTHORIZED",
 			Message: "La sesión no es válida",
@@ -121,7 +127,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.Logout(c.Request.Context(), tokenID.(string)); err != nil {
+	if err := h.service.Logout(c.Request.Context(), refreshToken); err != nil {
 		if err == service.ErrInexistentSession {
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
 				Code:    "SESSION_EXPIRED",
@@ -136,5 +142,55 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
+	clearRefreshCookie(c)
 	c.Status(http.StatusNoContent)
+}
+
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	refreshToken, err := c.Cookie(refreshCookieName)
+	if err != nil || refreshToken == "" {
+		respondSessionExpired(c)
+		return
+	}
+
+	res, err := h.service.Refresh(c.Request.Context(), refreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidRefreshToken), errors.Is(err, service.ErrRefreshReused):
+			clearRefreshCookie(c)
+			respondSessionExpired(c)
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "INTERNAL_SERVER_ERROR",
+					Message: "Ha ocurrido un error inesperado en el servidor",
+				},
+			})
+		}
+		return
+	}
+
+	setRefreshCookie(c, res.RefreshToken)
+	res.RefreshToken = ""
+	c.JSON(http.StatusOK, res)
+}
+
+func setRefreshCookie(c *gin.Context, refreshToken string) {
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(refreshCookieName, refreshToken, int(service.RefreshTokenTTL.Seconds()), refreshCookiePath, "", true, true)
+}
+
+func clearRefreshCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(refreshCookieName, "", -1, refreshCookiePath, "", true, true)
+}
+
+func respondSessionExpired(c *gin.Context) {
+	c.JSON(http.StatusUnauthorized, model.ErrorResponse{
+		Error: model.APIError{
+			Code:    "SESSION_EXPIRED",
+			Message: "La sesión expiró o ya no es válida",
+			Details: map[string]any{"redirect_to": "/v1/login"},
+		},
+	})
 }

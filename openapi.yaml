@@ -41,6 +41,7 @@ paths:
   /v1/login:
     post:
       summary: Iniciar sesión
+      description: Autentica con email y contraseña. Devuelve un access token de corta duración en el body y establece el refresh token como cookie httpOnly (no viaja en el body).
       requestBody:
         required: true
         content:
@@ -50,6 +51,9 @@ paths:
       responses:
         "200":
           description: Login exitoso
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
           content:
             application/json:
               schema:
@@ -57,14 +61,33 @@ paths:
         "400": { description: Datos de entrada inválidos }
         "401": { description: Credenciales inválidas }
         "500": { description: Error interno }
+  /v1/refresh:
+    post:
+      summary: Renovar la sesión
+      description: Rota el refresh token (enviado automáticamente como cookie httpOnly) y emite un access token nuevo junto con un refresh token nuevo. Si el refresh token ya había sido rotado y se reutiliza, se asume robo y se revoca toda la sesión.
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
+      responses:
+        "200":
+          description: Sesión renovada
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "401": { description: Refresh token ausente, inválido, expirado o reutilizado tras haber sido rotado }
+        "500": { description: Error interno }
   /v1/logout:
     post:
       summary: Cerrar sesión
-      security:
-        - bearerAuth: []
+      description: Revoca el refresh token de la sesión actual (enviado automáticamente como cookie httpOnly) y limpia la cookie. El access token vigente en ese momento sigue siendo válido hasta su expiración natural, pero ya no puede renovarse.
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
       responses:
         "204": { description: Sesión invalidada }
-        "401": { description: Sesión expirada o inválida }
+        "401": { description: Refresh token ausente, expirado o ya revocado }
         "500": { description: Error interno }
   /v1/password-recovery:
     post:
@@ -170,7 +193,7 @@ paths:
         "500": { description: Error interno }
     delete:
       summary: Limpiar el estado personalizado del usuario autenticado
-      description: Operación idempotente: borrar un estado ya vacío también responde 204.
+      description: "Operación idempotente: borrar un estado ya vacío también responde 204."
       security:
         - bearerAuth: []
       responses:
@@ -239,6 +262,19 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  parameters:
+    RefreshTokenCookie:
+      name: refresh_token
+      in: cookie
+      required: true
+      description: Refresh token httpOnly enviado automáticamente por el navegador. No se establece manualmente desde el cliente.
+      schema:
+        type: string
+  headers:
+    SetRefreshTokenCookie:
+      description: Establece (o limpia, en logout) el refresh token como cookie httpOnly, Secure y SameSite=Strict.
+      schema:
+        type: string
   schemas:
     RegisterRequest:
       type: object
@@ -280,11 +316,14 @@ components:
           format: password
     AuthResponse:
       type: object
-      required: [user, token]
+      required: [user, access_token]
+      description: El refresh token nunca viaja en el body de la respuesta; se entrega únicamente como cookie httpOnly (ver header Set-Cookie).
       properties:
         user:
           $ref: '#/components/schemas/UserResponse'
-        token: { type: string }
+        access_token:
+          type: string
+          description: 'JWT de corta duración (~15 minutos) para autenticar requests con el header "Authorization: Bearer".'
     UserResponse:
       type: object
       required: [id, name, email, created_at]

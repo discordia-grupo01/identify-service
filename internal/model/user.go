@@ -33,8 +33,9 @@ type PasswordResetRequest struct {
 }
 
 type AuthResponse struct {
-	User  UserResponse `json:"user"`
-	Token string       `json:"token"`
+	User         UserResponse `json:"user"`
+	Token        string       `json:"token"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
 }
 
 type UserResponse struct {
@@ -46,6 +47,15 @@ type UserResponse struct {
 	StatusText  string    `json:"status_text"`
 	StatusEmoji string    `json:"status_emoji"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RefreshToken struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	FamilyID  string     `json:"family_id"`
+	TokenHash string     `json:"token_hash"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
 }
 
 // PublicUserResponse es la vista de un usuario visible para terceros: solo
@@ -102,4 +112,8 @@ func NewPublicUserResponse(user *User) *PublicUserResponse {
 		StatusEmoji:     user.StatusEmoji,
 		MutualServerIDs: []string{},
 	}
+}
+
+func (rt *RefreshToken) IsActive() bool {
+	return rt.RevokedAt.IsZero() && time.Now().Before(rt.ExpiresAt)
 }

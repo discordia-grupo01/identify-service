@@ -6,17 +6,15 @@ import (
 	"strings"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
-	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
 const (
-	UserIDKey  = "auth_user_id"
-	TokenIDKey = "auth_token_id"
+	UserIDKey = "auth_user_id"
 )
 
-func RequireAuth(sessionRepo repository.SessionRepository) gin.HandlerFunc {
+func RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authorization := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authorization, "Bearer ") {
@@ -36,25 +34,13 @@ func RequireAuth(sessionRepo repository.SessionRepository) gin.HandlerFunc {
 			return
 		}
 
-		tokenID, ok := claims["jti"].(string)
-		if !ok || tokenID == "" {
-			unauthorized(c)
-			return
-		}
 		userID, ok := claims["sub"].(string)
 		if !ok || userID == "" {
 			unauthorized(c)
 			return
 		}
 
-		active, err := sessionRepo.IsActive(c.Request.Context(), tokenID)
-		if err != nil || !active {
-			unauthorized(c)
-			return
-		}
-
 		c.Set(UserIDKey, userID)
-		c.Set(TokenIDKey, tokenID)
 		c.Next()
 	}
 }

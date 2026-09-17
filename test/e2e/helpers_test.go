@@ -52,11 +52,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE sessions, users, server_memberships RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec(`TRUNCATE TABLE sessions, users, server_memberships RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	router := gin.New()
 
 	userRepo := repository.NewUserRepository(db)
-	sessionRepo := repository.NewSessionRepository(db)
+	sessionRepo := repository.NewRefreshTokenRepository(db)
 
 	authService := service.NewAuthService(userRepo, sessionRepo)
 	authHandler := handler.NewAuthHandler(authService)
@@ -92,11 +92,13 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
-		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
-		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
-		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
-		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
-		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
+		api.POST("/refresh", authHandler.Refresh)
+		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
+		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
+		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
+		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
 	}
 
 	return router
@@ -104,7 +106,13 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 
 // registerAndLogin crea un usuario real (POST /v1/users) y lo loguea
 // (POST /v1/login), devolviendo su id y un JWT real y válido.
-func registerAndLogin(t *testing.T, router *gin.Engine, name string, email string, password string) (userID string, token string) {
+type testSession struct {
+	UserID       string
+	AccessToken  string
+	RefreshToken string
+}
+
+func registerAndLoginSession(t *testing.T, router *gin.Engine, name string, email string, password string) testSession {
 	t.Helper()
 
 	registerBody, _ := json.Marshal(model.RegisterRequest{Name: name, Email: email, Password: password})
@@ -123,15 +131,42 @@ func registerAndLogin(t *testing.T, router *gin.Engine, name string, email strin
 	var authResponse model.AuthResponse
 	decodeJSON(t, loginRecorder, &authResponse)
 
-	return registered.ID, authResponse.Token
+	refreshToken := ""
+	for _, cookie := range loginRecorder.Result().Cookies() {
+		if cookie.Name == "refresh_token" {
+			refreshToken = cookie.Value
+			break
+		}
+	}
+	if refreshToken == "" {
+		t.Fatal("login response did not set a refresh_token cookie")
+	}
+
+	return testSession{
+		UserID:       registered.ID,
+		AccessToken:  authResponse.Token,
+		RefreshToken: refreshToken,
+	}
+}
+
+func registerAndLogin(t *testing.T, router *gin.Engine, name string, email string, password string) (userID string, accessToken string) {
+	session := registerAndLoginSession(t, router, name, email, password)
+	return session.UserID, session.AccessToken
 }
 
 func doRequest(router *gin.Engine, method string, path string, body []byte, bearerToken string) *httptest.ResponseRecorder {
+	return doRequestWithRefreshToken(router, method, path, body, bearerToken, "")
+}
+
+func doRequestWithRefreshToken(router *gin.Engine, method string, path string, body []byte, bearerToken string, refreshToken string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if bearerToken != "" {
 		request.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	if refreshToken != "" {
+		request.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
 	}
 	router.ServeHTTP(recorder, request)
 	return recorder

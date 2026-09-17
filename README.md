@@ -55,7 +55,7 @@ identify-service/
 ├── internal/
 │   ├── handler/              handlers HTTP: auth (registro/login/logout) y password recovery
 │   ├── service/               logica de negocio (auth_service, password_recovery_service)
-│   ├── repository/            acceso a datos: users, sessions, password_recoveries
+│   ├── repository/            acceso a datos: users, refresh_tokens, password_recoveries
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            envio de emails (SMTP) para recuperacion de contraseña
@@ -123,8 +123,9 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
-- `POST /v1/login` - login, devuelve el JWT.
-- `POST /v1/logout` - revoca la sesion actual.
+- `POST /v1/login` - login. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).
+- `POST /v1/logout` - revoca el refresh token de la sesion actual (via cookie) y limpia la cookie. El access token vigente en ese momento sigue siendo valido hasta que expira solo (maximo ~15 min), pero ya no se puede renovar.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.

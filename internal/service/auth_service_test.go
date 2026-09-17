@@ -20,47 +20,6 @@ type userRepositoryStub struct {
 	createdUser  *model.User
 }
 
-type sessionRepositoryStub struct {
-	createdTokenID string
-	createdUserID  string
-	createdExpiry  time.Time
-	revokedTokenID string
-	active         map[string]bool
-	revokeErr      error
-	created        map[string]time.Time
-}
-
-func (r *sessionRepositoryStub) Create(_ context.Context, tokenID string, userID string, expiresAt time.Time) error {
-	r.createdTokenID = tokenID
-	r.createdUserID = userID
-	r.createdExpiry = expiresAt
-	if r.active == nil {
-		r.active = make(map[string]bool)
-	}
-	if r.created == nil {
-		r.created = make(map[string]time.Time)
-	}
-	r.active[tokenID] = true
-	r.created[tokenID] = expiresAt
-	return nil
-}
-
-func (r *sessionRepositoryStub) IsActive(_ context.Context, tokenID string) (bool, error) {
-	return r.active[tokenID], nil
-}
-
-func (r *sessionRepositoryStub) Revoke(_ context.Context, tokenID string) error {
-	if r.revokeErr != nil {
-		return r.revokeErr
-	}
-	if !r.active[tokenID] {
-		return repository.ErrSessionNotFound
-	}
-	r.revokedTokenID = tokenID
-	r.active[tokenID] = false
-	return nil
-}
-
 var _ repository.UserRepository = (*userRepositoryStub)(nil)
 
 func (r *userRepositoryStub) GetByEmail(_ context.Context, _ string) (*model.User, error) {
@@ -75,7 +34,6 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	if r.createErr != nil {
 		return r.createErr
 	}
-
 	r.createdUser = user
 	user.ID = "550e8400-e29b-41d4-a716-446655440000"
 	user.CreatedAt = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -111,9 +69,97 @@ func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusTex
 	return r.existingUser, nil
 }
 
+type refreshTokenRecord struct {
+	userID    string
+	familyID  string
+	expiresAt time.Time
+	revokedAt *time.Time
+}
+
+type refreshTokenRepositoryStub struct {
+	tokens          map[string]*refreshTokenRecord
+	createErr       error
+	getErr          error
+	revokeErr       error
+	revokeFamilyErr error
+	revokeAllErr    error
+}
+
+func newRefreshTokenRepositoryStub() *refreshTokenRepositoryStub {
+	return &refreshTokenRepositoryStub{tokens: make(map[string]*refreshTokenRecord)}
+}
+
+var _ repository.RefreshTokenRepository = (*refreshTokenRepositoryStub)(nil)
+
+func (r *refreshTokenRepositoryStub) Create(_ context.Context, tokenHash string, userID string, familyID string, expiresAt time.Time) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	if r.tokens == nil {
+		r.tokens = make(map[string]*refreshTokenRecord)
+	}
+	r.tokens[tokenHash] = &refreshTokenRecord{userID: userID, familyID: familyID, expiresAt: expiresAt}
+	return nil
+}
+
+func (r *refreshTokenRepositoryStub) GetByHash(_ context.Context, tokenHash string) (*model.RefreshToken, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	record, ok := r.tokens[tokenHash]
+	if !ok {
+		return nil, repository.ErrRefreshTokenNotFound
+	}
+	return &model.RefreshToken{
+		UserID:    record.userID,
+		FamilyID:  record.familyID,
+		ExpiresAt: record.expiresAt,
+		RevokedAt: record.revokedAt,
+	}, nil
+}
+
+func (r *refreshTokenRepositoryStub) RevokeByHash(_ context.Context, tokenHash string) error {
+	if r.revokeErr != nil {
+		return r.revokeErr
+	}
+	record, ok := r.tokens[tokenHash]
+	if !ok || record.revokedAt != nil {
+		return repository.ErrRefreshTokenNotFound
+	}
+	now := time.Now()
+	record.revokedAt = &now
+	return nil
+}
+
+func (r *refreshTokenRepositoryStub) RevokeFamily(_ context.Context, familyID string) error {
+	if r.revokeFamilyErr != nil {
+		return r.revokeFamilyErr
+	}
+	now := time.Now()
+	for _, record := range r.tokens {
+		if record.familyID == familyID && record.revokedAt == nil {
+			record.revokedAt = &now
+		}
+	}
+	return nil
+}
+
+func (r *refreshTokenRepositoryStub) RevokeAllForUser(_ context.Context, userID string) error {
+	if r.revokeAllErr != nil {
+		return r.revokeAllErr
+	}
+	now := time.Now()
+	for _, record := range r.tokens {
+		if record.userID == userID && record.revokedAt == nil {
+			record.revokedAt = &now
+		}
+	}
+	return nil
+}
+
 func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 	repo := &userRepositoryStub{}
-	service := NewAuthService(repo)
+	service := NewAuthService(repo, nil)
 	request := model.RegisterRequest{
 		Name:     "Ada Lovelace",
 		Email:    "ada@example.com",
@@ -144,7 +190,7 @@ func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 
 func TestAuthServiceRegisterRejectsExistingEmail(t *testing.T) {
 	repo := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
-	service := NewAuthService(repo)
+	service := NewAuthService(repo, nil)
 
 	response, err := service.Register(context.Background(), model.RegisterRequest{
 		Name:     "Ada Lovelace",
@@ -177,7 +223,7 @@ func TestAuthServiceRegisterRejectsInsecurePasswords(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &userRepositoryStub{}
-			service := NewAuthService(repo)
+			service := NewAuthService(repo, nil)
 
 			response, err := service.Register(context.Background(), model.RegisterRequest{
 				Name:     "Ada Lovelace",
@@ -200,7 +246,7 @@ func TestAuthServiceRegisterPropagatesRepositoryErrors(t *testing.T) {
 
 	t.Run("lookup", func(t *testing.T) {
 		repo := &userRepositoryStub{getErr: repositoryErr}
-		service := NewAuthService(repo)
+		service := NewAuthService(repo, nil)
 
 		_, err := service.Register(context.Background(), model.RegisterRequest{
 			Name:     "Ada Lovelace",
@@ -215,7 +261,7 @@ func TestAuthServiceRegisterPropagatesRepositoryErrors(t *testing.T) {
 
 	t.Run("create", func(t *testing.T) {
 		repo := &userRepositoryStub{createErr: repositoryErr}
-		service := NewAuthService(repo)
+		service := NewAuthService(repo, nil)
 
 		_, err := service.Register(context.Background(), model.RegisterRequest{
 			Name:     "Ada Lovelace",
@@ -229,7 +275,24 @@ func TestAuthServiceRegisterPropagatesRepositoryErrors(t *testing.T) {
 	})
 }
 
-func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
+func TestAuthServiceRegisterDoesNotCreateRefreshToken(t *testing.T) {
+	refreshRepo := newRefreshTokenRepositoryStub()
+	response, err := NewAuthService(&userRepositoryStub{}, refreshRepo).Register(context.Background(), model.RegisterRequest{
+		Name: "Ada Lovelace", Email: "ada@example.com", Password: "Secure123",
+	})
+
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if response == nil || response.ID == "" {
+		t.Fatal("Register() must return the created user")
+	}
+	if len(refreshRepo.tokens) != 0 {
+		t.Fatalf("persisted refresh tokens = %d, want 0", len(refreshRepo.tokens))
+	}
+}
+
+func TestAuthServiceLoginReturnsUserAndTokens(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
 	if err != nil {
@@ -242,9 +305,9 @@ func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
 		PasswordHash: string(passwordHash),
 		CreatedAt:    time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
 	}}
-	sessionRepo := &sessionRepositoryStub{}
+	refreshRepo := newRefreshTokenRepositoryStub()
 
-	response, err := NewAuthService(repo, sessionRepo).Login(context.Background(), model.LoginRequest{
+	response, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
 		Email:    "ada@example.com",
 		Password: "Secure123",
 	})
@@ -252,22 +315,27 @@ func TestAuthServiceLoginReturnsUserAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if response == nil || response.Token == "" || response.User.ID != "550e8400-e29b-41d4-a716-446655440000" {
+	if response == nil || response.Token == "" || response.RefreshToken == "" {
 		t.Fatalf("unexpected login response: %+v", response)
 	}
-	if sessionRepo.createdTokenID == "" {
-		t.Fatal("Login() must persist the session")
+	if response.User.ID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("unexpected user in response: %+v", response.User)
 	}
 
-	if err := NewAuthService(repo, sessionRepo).Logout(context.Background(), sessionRepo.createdTokenID); err != nil {
+	hash := hashToken(response.RefreshToken)
+	if _, ok := refreshRepo.tokens[hash]; !ok {
+		t.Fatal("Login() must persist the refresh token")
+	}
+
+	if err := NewAuthService(repo, refreshRepo).Logout(context.Background(), response.RefreshToken); err != nil {
 		t.Fatalf("Logout() error = %v", err)
 	}
-	if sessionRepo.revokedTokenID != sessionRepo.createdTokenID {
-		t.Fatalf("Logout() revoked token = %q, want %q", sessionRepo.revokedTokenID, sessionRepo.createdTokenID)
+	if refreshRepo.tokens[hash].revokedAt == nil {
+		t.Fatal("Logout() must revoke the refresh token")
 	}
 }
 
-func TestAuthServiceLoginCreatesUniqueExpiringSession(t *testing.T) {
+func TestAuthServiceLoginCreatesUniqueExpiringTokens(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
 	if err != nil {
@@ -279,8 +347,8 @@ func TestAuthServiceLoginCreatesUniqueExpiringSession(t *testing.T) {
 		Email:        "ada@example.com",
 		PasswordHash: string(passwordHash),
 	}}
-	sessionRepo := &sessionRepositoryStub{}
-	authService := NewAuthService(repo, sessionRepo)
+	refreshRepo := newRefreshTokenRepositoryStub()
+	authService := NewAuthService(repo, refreshRepo)
 
 	first, err := authService.Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
 	if err != nil {
@@ -290,78 +358,69 @@ func TestAuthServiceLoginCreatesUniqueExpiringSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Login() error = %v", err)
 	}
+
 	if first.Token == second.Token {
-		t.Fatal("separate logins must create different tokens")
+		t.Fatal("separate logins must create different access tokens")
 	}
-	if len(sessionRepo.created) != 2 {
-		t.Fatalf("created sessions = %d, want 2", len(sessionRepo.created))
+	if first.RefreshToken == second.RefreshToken {
+		t.Fatal("separate logins must create different refresh tokens")
 	}
+	if len(refreshRepo.tokens) != 2 {
+		t.Fatalf("persisted refresh tokens = %d, want 2", len(refreshRepo.tokens))
+	}
+
 	firstClaims := parseTokenClaims(t, first.Token)
 	secondClaims := parseTokenClaims(t, second.Token)
 	if firstClaims["jti"] == secondClaims["jti"] {
-		t.Fatal("separate logins must create different token IDs")
+		t.Fatal("separate logins must create different access token IDs")
 	}
+
 	for name, claims := range map[string]jwt.MapClaims{"first": firstClaims, "second": secondClaims} {
 		expiration, ok := claims["exp"].(float64)
 		if !ok {
-			t.Fatalf("%s token exp claim = %T, want number", name, claims["exp"])
+			t.Fatalf("%s access token exp claim = %T, want number", name, claims["exp"])
 		}
 		remaining := time.Until(time.Unix(int64(expiration), 0))
-		if remaining < 71*time.Hour || remaining > 73*time.Hour {
-			t.Fatalf("%s token expiration remaining = %v, want approximately 72 hours", name, remaining)
+		if remaining < 14*time.Minute || remaining > 16*time.Minute {
+			t.Fatalf("%s access token expiration remaining = %v, want approximately 15 minutes", name, remaining)
 		}
 	}
 
-	for tokenID, expiresAt := range sessionRepo.created {
-		if !sessionRepo.active[tokenID] {
-			t.Fatalf("session %q must be active after login", tokenID)
-		}
-		remaining := time.Until(expiresAt)
-		if remaining < 71*time.Hour || remaining > 73*time.Hour {
-			t.Fatalf("session %q expiration remaining = %v, want approximately 72 hours", tokenID, remaining)
+	firstHash := hashToken(first.RefreshToken)
+	secondHash := hashToken(second.RefreshToken)
+	if refreshRepo.tokens[firstHash].familyID == refreshRepo.tokens[secondHash].familyID {
+		t.Fatal("separate logins must create different token families")
+	}
+	for name, record := range map[string]*refreshTokenRecord{"first": refreshRepo.tokens[firstHash], "second": refreshRepo.tokens[secondHash]} {
+		remaining := time.Until(record.expiresAt)
+		if remaining < 29*24*time.Hour || remaining > 31*24*time.Hour {
+			t.Fatalf("%s refresh token expiration remaining = %v, want approximately 30 days", name, remaining)
 		}
 	}
 }
 
-func parseTokenClaims(t *testing.T, tokenString string) jwt.MapClaims {
-	t.Helper()
-	token, err := jwt.ParseWithClaims(tokenString, jwt.MapClaims{}, func(token *jwt.Token) (any, error) {
-		return []byte("test-secret"), nil
-	})
+func TestAuthServiceLoginPropagatesRefreshTokenPersistenceError(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
 	if err != nil {
-		t.Fatalf("ParseWithClaims() error = %v", err)
+		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		t.Fatalf("token claims = %T, want jwt.MapClaims", token.Claims)
-	}
-	return claims
-}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
+		Email:        "ada@example.com",
+		PasswordHash: string(passwordHash),
+	}}
+	refreshRepo := newRefreshTokenRepositoryStub()
+	repositoryErr := errors.New("database unavailable")
+	refreshRepo.createErr = repositoryErr
 
-func TestAuthServiceRegisterDoesNotCreateSession(t *testing.T) {
-	sessionRepo := &sessionRepositoryStub{}
-	response, err := NewAuthService(&userRepositoryStub{}, sessionRepo).Register(context.Background(), model.RegisterRequest{
-		Name: "Ada Lovelace", Email: "ada@example.com", Password: "Secure123",
+	_, err = NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
 	})
 
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if response == nil || response.ID == "" {
-		t.Fatal("Register() must return the created user")
-	}
-	if len(sessionRepo.created) != 0 {
-		t.Fatalf("created sessions = %d, want 0", len(sessionRepo.created))
-	}
-}
-
-func TestAuthServiceLogoutRejectsAbsentToken(t *testing.T) {
-	sessionRepo := &sessionRepositoryStub{active: map[string]bool{}}
-
-	err := NewAuthService(&userRepositoryStub{}, sessionRepo).Logout(context.Background(), "missing-token")
-
-	if !errors.Is(err, ErrInexistentSession) {
-		t.Fatalf("Logout() error = %v, want ErrInexistentSession", err)
+	if !errors.Is(err, repositoryErr) {
+		t.Fatalf("Login() error = %v, want repository error", err)
 	}
 }
 
@@ -382,7 +441,7 @@ func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &userRepositoryStub{existingUser: test.user}
-			response, loginErr := NewAuthService(repo).Login(context.Background(), model.LoginRequest{
+			response, loginErr := NewAuthService(repo, nil).Login(context.Background(), model.LoginRequest{
 				Email:    "ada@example.com",
 				Password: "Wrong123",
 			})
@@ -400,7 +459,7 @@ func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
 func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 	repositoryErr := errors.New("database unavailable")
 	repo := &userRepositoryStub{getErr: repositoryErr}
-	service := NewAuthService(repo)
+	service := NewAuthService(repo, nil)
 
 	_, err := service.Login(context.Background(), model.LoginRequest{
 		Email:    "ada@example.com",
@@ -410,4 +469,169 @@ func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 	if !errors.Is(err, repositoryErr) {
 		t.Fatalf("Login() error = %v, want repository error", err)
 	}
+}
+
+func TestAuthServiceLogoutRejectsAbsentToken(t *testing.T) {
+	refreshRepo := newRefreshTokenRepositoryStub()
+
+	err := NewAuthService(&userRepositoryStub{}, refreshRepo).Logout(context.Background(), "missing-token")
+
+	if !errors.Is(err, ErrInexistentSession) {
+		t.Fatalf("Logout() error = %v, want ErrInexistentSession", err)
+	}
+}
+
+func loginTestUser(t *testing.T, refreshRepo *refreshTokenRepositoryStub) (*userRepositoryStub, *model.AuthResponse) {
+	t.Helper()
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
+		Name:         "Ada Lovelace",
+		Email:        "ada@example.com",
+		PasswordHash: string(passwordHash),
+	}}
+	response, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+	})
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	return repo, response
+}
+
+func TestAuthServiceRefreshRotatesTokenWithinSameFamily(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	repo, login := loginTestUser(t, refreshRepo)
+
+	rotated, err := NewAuthService(repo, refreshRepo).Refresh(context.Background(), login.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if rotated.Token == login.Token {
+		t.Fatal("Refresh() must issue a new access token")
+	}
+	if rotated.RefreshToken == login.RefreshToken {
+		t.Fatal("Refresh() must issue a new refresh token")
+	}
+
+	oldHash := hashToken(login.RefreshToken)
+	newHash := hashToken(rotated.RefreshToken)
+	if refreshRepo.tokens[oldHash].revokedAt == nil {
+		t.Fatal("Refresh() must revoke the previous refresh token")
+	}
+	if refreshRepo.tokens[newHash].revokedAt != nil {
+		t.Fatal("the newly issued refresh token must not be revoked")
+	}
+	if refreshRepo.tokens[oldHash].familyID != refreshRepo.tokens[newHash].familyID {
+		t.Fatal("rotation must preserve the token family")
+	}
+}
+
+func TestAuthServiceRefreshRejectsUnknownToken(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+
+	_, err := NewAuthService(&userRepositoryStub{}, refreshRepo).Refresh(context.Background(), "never-issued-token")
+
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("Refresh() error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
+func TestAuthServiceRefreshRejectsExpiredToken(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	plainToken := "expired-plain-token"
+	refreshRepo.tokens[hashToken(plainToken)] = &refreshTokenRecord{
+		userID:    "550e8400-e29b-41d4-a716-446655440000",
+		familyID:  "family-1",
+		expiresAt: time.Now().Add(-time.Hour),
+	}
+
+	_, err := NewAuthService(&userRepositoryStub{}, refreshRepo).Refresh(context.Background(), plainToken)
+
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("Refresh() error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
+func TestAuthServiceRefreshDetectsReuseAndRevokesWholeFamily(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	repo, login := loginTestUser(t, refreshRepo)
+	authService := NewAuthService(repo, refreshRepo)
+
+	rotated, err := authService.Refresh(context.Background(), login.RefreshToken)
+	if err != nil {
+		t.Fatalf("first Refresh() error = %v", err)
+	}
+
+	_, err = authService.Refresh(context.Background(), login.RefreshToken)
+	if !errors.Is(err, ErrRefreshReused) {
+		t.Fatalf("reused Refresh() error = %v, want ErrRefreshReused", err)
+	}
+
+	rotatedHash := hashToken(rotated.RefreshToken)
+	if refreshRepo.tokens[rotatedHash].revokedAt == nil {
+		t.Fatal("detecting reuse must revoke every token in the family, including the one from the legitimate rotation")
+	}
+
+	_, err = authService.Refresh(context.Background(), rotated.RefreshToken)
+	if !errors.Is(err, ErrRefreshReused) {
+		t.Fatalf("Refresh() with the now-revoked rotated token error = %v, want ErrRefreshReused", err)
+	}
+}
+
+func TestAuthServiceRefreshAfterLogoutIsRejected(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	repo, login := loginTestUser(t, refreshRepo)
+	authService := NewAuthService(repo, refreshRepo)
+
+	if err := authService.Logout(context.Background(), login.RefreshToken); err != nil {
+		t.Fatalf("Logout() error = %v", err)
+	}
+
+	_, err := authService.Refresh(context.Background(), login.RefreshToken)
+	if !errors.Is(err, ErrRefreshReused) {
+		t.Fatalf("Refresh() after logout error = %v, want ErrRefreshReused", err)
+	}
+}
+
+func TestAuthServiceRefreshRejectsWhenUserNoLongerExists(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	plainToken := "orphan-plain-token"
+	refreshRepo.tokens[hashToken(plainToken)] = &refreshTokenRecord{
+		userID:    "550e8400-e29b-41d4-a716-446655440099",
+		familyID:  "family-2",
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	repo := &userRepositoryStub{existingUser: nil}
+
+	_, err := NewAuthService(repo, refreshRepo).Refresh(context.Background(), plainToken)
+
+	if !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("Refresh() error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
+func parseTokenClaims(t *testing.T, tokenString string) jwt.MapClaims {
+	t.Helper()
+	token, err := jwt.ParseWithClaims(tokenString, jwt.MapClaims{}, func(token *jwt.Token) (any, error) {
+		return []byte("test-secret"), nil
+	})
+	if err != nil {
+		t.Fatalf("ParseWithClaims() error = %v", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("token claims = %T, want jwt.MapClaims", token.Claims)
+	}
+	return claims
 }

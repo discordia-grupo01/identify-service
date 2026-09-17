@@ -41,9 +41,9 @@ func main() {
 	router := gin.Default()
 
 	userRepo := repository.NewUserRepository(dbConnection)
-	sessionRepo := repository.NewSessionRepository(dbConnection)
+	refreshRepo := repository.NewRefreshTokenRepository(dbConnection)
 	passwordRecoveryRepo := repository.NewPostgresPasswordRecoveryRepository(dbConnection)
-	authService := service.NewAuthService(userRepo, sessionRepo)
+	authService := service.NewAuthService(userRepo, refreshRepo)
 	authHandler := handler.NewAuthHandler(authService)
 	emailConfig, err := emailutil.ConfigFromEnv()
 	if err != nil {
@@ -105,14 +105,15 @@ func main() {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
-		api.POST("/logout", middleware.RequireAuth(sessionRepo), authHandler.Logout)
+		api.POST("/refresh", authHandler.Refresh)
+		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
-		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
-		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
-		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
-		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
-		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
+		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
+		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
+		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
 	}
 
 	addr := host + ":" + port

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -18,34 +19,38 @@ import (
 )
 
 var (
-	ErrPasswordInsecure   = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
-	ErrEmailInUse         = errors.New("el correo electrónico ya está registrado")
-	ErrInvalidCredentials = errors.New("correo electrónico o contraseña inválidos")
-	ErrInexistentSession  = errors.New("la sesión no existe o ya ha sido revocada")
+	ErrPasswordInsecure    = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
+	ErrEmailInUse          = errors.New("el correo electrónico ya está registrado")
+	ErrInvalidCredentials  = errors.New("correo electrónico o contraseña inválidos")
+	ErrInexistentSession   = errors.New("la sesión no existe o ya ha sido revocada")
+	ErrInvalidRefreshToken = errors.New("token de actualización inválido o expirado")
+	ErrRefreshReused       = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 )
 
 const (
-	HOURS_TO_EXPIRE = 72
+	AccessTokenTTL  = 15 * time.Minute
+	RefreshTokenTTL = 24 * 30 * time.Hour
 	jwtIssuer       = "discordia-issuer"
 )
 
 type AuthService interface {
 	Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error)
 	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
-	Logout(ctx context.Context, tokenID string) error
+	Logout(ctx context.Context, refreshToken string) error
+	Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 }
 
 type authService struct {
 	repo        repository.UserRepository
-	sessionRepo repository.SessionRepository
+	refreshRepo repository.RefreshTokenRepository
 }
 
-func NewAuthService(repo repository.UserRepository, sessionRepos ...repository.SessionRepository) AuthService {
-	var sessionRepo repository.SessionRepository
-	if len(sessionRepos) > 0 {
-		sessionRepo = sessionRepos[0]
+func NewAuthService(repo repository.UserRepository, tokenRepo ...repository.RefreshTokenRepository) AuthService {
+	var refreshRepo repository.RefreshTokenRepository
+	if len(tokenRepo) > 0 {
+		refreshRepo = tokenRepo[0]
 	}
-	return &authService{repo: repo, sessionRepo: sessionRepo}
+	return &authService{repo: repo, refreshRepo: refreshRepo}
 }
 
 func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
@@ -93,33 +98,53 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, ErrInvalidCredentials
 	}
 
-	token, tokenID, expiresAt, err := generateJWT(user.ID)
-	if err != nil {
-		return nil, err
-	}
-	if s.sessionRepo != nil {
-		if err := s.sessionRepo.Create(ctx, tokenID, user.ID, expiresAt); err != nil {
-			return nil, err
-		}
-	}
-
-	return &model.AuthResponse{
-		User:  *model.NewUserResponse(user),
-		Token: token,
-	}, nil
+	return s.issueTokenPair(ctx, user, uuid.NewString())
 }
 
-func (s *authService) Logout(ctx context.Context, tokenID string) error {
-	if s.sessionRepo == nil {
-		return ErrInexistentSession
-	}
-	if err := s.sessionRepo.Revoke(ctx, tokenID); err != nil {
-		if errors.Is(err, repository.ErrSessionNotFound) {
+func (s *authService) Logout(ctx context.Context, refreshToken string) error {
+	hash := hashToken(refreshToken)
+	if err := s.refreshRepo.RevokeByHash(ctx, hash); err != nil {
+		if errors.Is(err, repository.ErrRefreshTokenNotFound) {
 			return ErrInexistentSession
 		}
 		return err
 	}
 	return nil
+}
+
+func (s *authService) Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error) {
+	hash := hashToken(refreshToken)
+
+	rt, err := s.refreshRepo.GetByHash(ctx, hash)
+	if err != nil {
+		if errors.Is(err, repository.ErrRefreshTokenNotFound) {
+			return nil, ErrInvalidRefreshToken
+		}
+		return nil, err
+	}
+
+	if rt.RevokedAt != nil {
+		// Posible ataque de reutilización de token: revocamos toda la familia de tokens.
+		_ = s.refreshRepo.RevokeFamily(ctx, rt.FamilyID)
+		return nil, ErrRefreshReused
+	}
+	if time.Now().After(rt.ExpiresAt) {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	if err := s.refreshRepo.RevokeByHash(ctx, hash); err != nil {
+		return nil, err
+	}
+
+	user, err := s.repo.GetByID(ctx, rt.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	return s.issueTokenPair(ctx, user, rt.FamilyID)
 }
 
 func validatePassword(password string) bool {
@@ -133,28 +158,51 @@ func validatePassword(password string) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
-func generateJWT(userID string) (string, string, time.Time, error) {
+func generateAccessJWT(userID string) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
-	tokenID, err := newTokenID()
-	if err != nil {
-		return "", "", time.Time{}, err
-	}
-	expiresAt := time.Now().Add(HOURS_TO_EXPIRE * time.Hour)
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
 		"sub": userID,
-		"jti": tokenID,
-		"exp": expiresAt.Unix(),
+		"jti": uuid.NewString(),
+		"exp": time.Now().Add(AccessTokenTTL).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err := token.SignedString([]byte(secret))
-	return signedToken, tokenID, expiresAt, err
+	return token.SignedString([]byte(secret))
 }
 
-func newTokenID() (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
+func generateRefreshToken() (plain string, hash string, err error) {
+	buf := make([]byte, 32)
+	if _, err = rand.Read(buf); err != nil {
+		return "", "", err
 	}
-	return hex.EncodeToString(value), nil
+	plain = hex.EncodeToString(buf)
+	return plain, hashToken(plain), nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *authService) issueTokenPair(ctx context.Context, user *model.User, familyID string) (*model.AuthResponse, error) {
+	accessToken, err := generateAccessJWT(user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshPlain, refreshHash, err := generateRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+
+	expiresAt := time.Now().Add(RefreshTokenTTL)
+	if err := s.refreshRepo.Create(ctx, refreshHash, user.ID, familyID, expiresAt); err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		User:         *model.NewUserResponse(user),
+		Token:        accessToken,
+		RefreshToken: refreshPlain,
+	}, nil
 }
