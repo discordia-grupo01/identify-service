@@ -61,6 +61,37 @@ paths:
         "400": { description: Datos de entrada inválidos }
         "401": { description: Credenciales inválidas }
         "500": { description: Error interno }
+  /v1/oauth/google:
+    post:
+      summary: Login con proveedor federado (Google)
+      description: >-
+        Valida el ID token emitido por Google (obtenido en el cliente vía
+        Google Identity Services / expo-auth-session) y autentica al
+        usuario: si ya existe una identidad vinculada, inicia sesión con esa
+        cuenta; si no, busca una cuenta con el mismo email para vincularla, o
+        crea una cuenta nueva. Devuelve la misma forma de respuesta que
+        /v1/login (access token en el body, refresh token como cookie
+        httpOnly).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleLoginRequest'
+      responses:
+        "200":
+          description: Login exitoso (cuenta nueva o vinculada a una existente)
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400": { description: Falta el id_token }
+        "401": { description: El id_token es inválido, expiró, o el email no está verificado }
+        "503": { description: No se pudo contactar al proveedor externo (Google); el cliente debe ofrecer login con email y contraseña }
+        "500": { description: Error interno }
   /v1/refresh:
     post:
       summary: Renovar la sesión
@@ -297,6 +328,13 @@ components:
       properties:
         email: { type: string, format: email }
         password: { type: string, format: password }
+    GoogleLoginRequest:
+      type: object
+      required: [id_token]
+      properties:
+        id_token:
+          type: string
+          description: ID token JWT emitido por Google, con audiencia igual a GOOGLE_CLIENT_ID.
     PasswordRecoveryRequest:
       type: object
       required: [email]
