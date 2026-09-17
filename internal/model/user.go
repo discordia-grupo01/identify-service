@@ -6,6 +6,10 @@ type User struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Email        string    `json:"email"`
+	Description  string    `json:"description"`
+	AvatarURL    string    `json:"avatar_url"`
+	StatusText   string    `json:"status_text"`
+	StatusEmoji  string    `json:"status_emoji"`
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -34,8 +38,65 @@ type AuthResponse struct {
 }
 
 type UserResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Email       string    `json:"email"`
+	Description string    `json:"description"`
+	AvatarURL   string    `json:"avatar_url"`
+	StatusText  string    `json:"status_text"`
+	StatusEmoji string    `json:"status_emoji"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// PublicUserResponse es la vista de un usuario visible para terceros: nunca
+// incluye email ni description, que son datos propios del usuario.
+type PublicUserResponse struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	AvatarURL   string    `json:"avatar_url"`
+	StatusText  string    `json:"status_text"`
+	StatusEmoji string    `json:"status_emoji"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	MutualServerIDs []string `json:"mutual_server_ids"`
+}
+
+type ProfileUpdateRequest struct {
+	Name             *string
+	Description      *string
+	Image            []byte
+	ImageContentType string
+	ImageProvided    bool
+}
+
+// StatusUpdateRequest representa el estado personalizado a fijar. Un campo
+// nil significa "no tocar ese campo"; un puntero a "" significa "limpiarlo".
+type StatusUpdateRequest struct {
+	StatusText  *string `json:"status_text"`
+	StatusEmoji *string `json:"status_emoji"`
+}
+
+func NewUserResponse(user *User) *UserResponse {
+	return &UserResponse{
+		ID:          user.ID,
+		Name:        user.Name,
+		Email:       user.Email,
+		Description: user.Description,
+		AvatarURL:   user.AvatarURL,
+		StatusText:  user.StatusText,
+		StatusEmoji: user.StatusEmoji,
+		CreatedAt:   user.CreatedAt.UTC(),
+	}
+}
+
+func NewPublicUserResponse(user *User) *PublicUserResponse {
+	return &PublicUserResponse{
+		ID:              user.ID,
+		Name:            user.Name,
+		AvatarURL:       user.AvatarURL,
+		StatusText:      user.StatusText,
+		StatusEmoji:     user.StatusEmoji,
+		CreatedAt:       user.CreatedAt.UTC(),
+		MutualServerIDs: []string{},
+	}
 }

@@ -40,6 +40,8 @@ make run
 | PASSWORD_RESET_URL | http://localhost:3000/reset-password | URL base del frontend para recuperar la contraseña. |
 | PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
+| PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
+| PROFILE_IMAGE_URL | /uploads/profile-images | URL publica base de las imagenes de perfil. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
@@ -57,7 +59,7 @@ identify-service/
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            envio de emails (SMTP) para recuperacion de contraseña
-│   └── events/                 publish/consume de eventos (RabbitMQ, etc.) - todavia sin uso
+│   └── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
 │   └── workflows/
@@ -70,7 +72,7 @@ identify-service/
 ├── Makefile                   comandos run/test/build/migrate
 └── .env.example                estructura de variables de entorno (sin valores sensibles)
 ```
-`internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go). Solo `internal/events/` sigue vacia (`.gitkeep`): todavia no se publican ni consumen eventos desde este servicio.
+`internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go).
 
 ## Comandos (Makefile)
 - `make run` - corre el servicio localmente (`go run ./cmd/api`).
@@ -83,6 +85,21 @@ identify-service/
 make test
 ```
 Cobertura minima: 70% (requisito del proyecto).
+
+Los tests en `test/e2e/` son de punta a punta: arman el router real (repos, servicios y handlers reales) contra un Postgres real, sin stubs. Se saltean automaticamente si no hay `DATABASE_HOST` seteado. Para correrlos:
+```bash
+docker compose up -d db
+make migrate
+DATABASE_HOST=localhost DATABASE_PORT=5432 DATABASE_USER=discordia DATABASE_PASSWORD=discordia DATABASE_NAME=discordia_servicio \
+  go test ./test/e2e/... -v
+```
+
+`TestMutualServersRabbitMQPipeline` ademas necesita un RabbitMQ real; se saltea sola si no hay `RABBITMQ_URL` seteado:
+```bash
+docker run -d --name discordia-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management-alpine
+DATABASE_HOST=localhost RABBITMQ_URL=amqp://guest:guest@localhost:5672/ \
+  go test ./test/e2e/... -run TestMutualServersRabbitMQPipeline -v
+```
 
 ## Supabase (produccion)
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
@@ -110,14 +127,21 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/logout` - revoca la sesion actual.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
+- `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
+- `GET /v1/me/profile` - Envia informacion del usuario. Requiere Bearer JWT del mismo
+- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, status_text, status_emoji, created_at, mutual_server_ids; sin email ni description). `mutual_server_ids` son los IDs (no nombre/icono, ver PLANNING_RABBITMQ.md) de los servidores que el usuario autenticado comparte con `{id}`; vacio si no comparten ninguno o si es el propio perfil. Se alimenta de un consumer de RabbitMQ que escucha `servers.member_joined`/`servers.member_left` publicados por `discordia-servers`. Requiere Bearer JWT.
+- `PUT /v1/me/status` - fija o actualiza el estado personalizado (status_text, status_emoji). Cada campo es independiente: omitirlo no lo toca, mandarlo vacio lo limpia. Requiere Bearer JWT.
+- `DELETE /v1/me/status` - limpia el estado personalizado (idempotente). Requiere Bearer JWT.
 
 Ver `openapi.yaml` para el detalle de cada request/response.
+
+Las imagenes locales se guardan en `PROFILE_IMAGE_DIR` y se sirven desde `PROFILE_IMAGE_URL`. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo por Oracle Object Storage sin cambiar el servicio de perfil.
 
 ## Eventos que publica
 Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
 
 ## Eventos que consume
-Todavia no consume eventos.
+- `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
 
 ## Health checks
 - GET /livez

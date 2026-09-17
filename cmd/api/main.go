@@ -7,11 +7,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
+	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -53,6 +55,25 @@ func main() {
 	}
 	passwordRecoveryService := service.NewPasswordRecoveryService(passwordRecoveryRepo, userRepo, emailService)
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
+	profileImageStorage := profileimage.NewLocalStorage(
+		getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"),
+		getEnv("PROFILE_IMAGE_URL", "/uploads/profile-images"),
+	)
+	membershipRepo := repository.NewServerMembershipRepository(dbConnection)
+	profileService := service.NewProfileService(userRepo, profileImageStorage, membershipRepo)
+	profileHandler := handler.NewProfileHandler(profileService)
+	router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
+
+	// El consumer de RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un
+	// entorno sin la dependencia levantada) el resto del servicio sigue
+	// funcionando normalmente, solo sin "servidores en común" actualizados.
+	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
+		membershipHandler := events.NewMembershipHandler(membershipRepo)
+		consumer := events.NewConsumer(rabbitMQURL, membershipHandler)
+		go consumer.Start(context.Background())
+	} else {
+		log.Println("RABBITMQ_URL no configurada: el consumer de membership no se inicia")
+	}
 
 	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
 	router.GET("/livez", func(c *gin.Context) {
@@ -87,6 +108,11 @@ func main() {
 		api.POST("/logout", middleware.RequireAuth(sessionRepo), authHandler.Logout)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
+		api.PATCH("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.Update)
+		api.GET("/me/profile", middleware.RequireAuth(sessionRepo), profileHandler.GetProfile)
+		api.GET("/users/:id", middleware.RequireAuth(sessionRepo), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(sessionRepo), profileHandler.DeleteStatus)
 	}
 
 	addr := host + ":" + port
