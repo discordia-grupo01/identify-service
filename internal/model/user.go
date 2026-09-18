@@ -1,18 +1,21 @@
 package model
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 type User struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	Description  string    `json:"description"`
-	AvatarURL    string    `json:"avatar_url"`
-	StatusText   string    `json:"status_text"`
-	StatusEmoji  string    `json:"status_emoji"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Email        string         `json:"email"`
+	Description  string         `json:"description"`
+	AvatarURL    string         `json:"avatar_url"`
+	StatusText   string         `json:"status_text"`
+	StatusEmoji  string         `json:"status_emoji"`
+	PasswordHash sql.NullString `json:"-"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type RegisterRequest struct {

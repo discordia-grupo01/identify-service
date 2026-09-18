@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -180,10 +181,10 @@ func TestAuthServiceRegisterCreatesUserWithoutToken(t *testing.T) {
 	if repo.createdUser == nil {
 		t.Fatal("Create() was not called")
 	}
-	if repo.createdUser.PasswordHash == request.Password {
+	if repo.createdUser.PasswordHash.String == request.Password {
 		t.Fatal("password must not be stored in plain text")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(repo.createdUser.PasswordHash), []byte(request.Password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(repo.createdUser.PasswordHash.String), []byte(request.Password)); err != nil {
 		t.Fatalf("stored password is not a valid hash: %v", err)
 	}
 }
@@ -302,7 +303,7 @@ func TestAuthServiceLoginReturnsUserAndTokens(t *testing.T) {
 		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Name:         "Ada Lovelace",
 		Email:        "ada@example.com",
-		PasswordHash: string(passwordHash),
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
 		CreatedAt:    time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
@@ -345,7 +346,7 @@ func TestAuthServiceLoginCreatesUniqueExpiringTokens(t *testing.T) {
 		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Name:         "Ada Lovelace",
 		Email:        "ada@example.com",
-		PasswordHash: string(passwordHash),
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 	authService := NewAuthService(repo, refreshRepo)
@@ -408,7 +409,7 @@ func TestAuthServiceLoginPropagatesRefreshTokenPersistenceError(t *testing.T) {
 	repo := &userRepositoryStub{existingUser: &model.User{
 		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Email:        "ada@example.com",
-		PasswordHash: string(passwordHash),
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 	repositoryErr := errors.New("database unavailable")
@@ -435,7 +436,7 @@ func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
 		user *model.User
 	}{
 		{name: "unknown email", user: nil},
-		{name: "wrong password", user: &model.User{PasswordHash: string(passwordHash)}},
+		{name: "wrong password", user: &model.User{PasswordHash: sql.NullString{String: string(passwordHash), Valid: true}}},
 	}
 
 	for _, test := range tests {
@@ -491,7 +492,7 @@ func loginTestUser(t *testing.T, refreshRepo *refreshTokenRepositoryStub) (*user
 		ID:           "550e8400-e29b-41d4-a716-446655440000",
 		Name:         "Ada Lovelace",
 		Email:        "ada@example.com",
-		PasswordHash: string(passwordHash),
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
 	}}
 	response, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
 		Email:    "ada@example.com",
