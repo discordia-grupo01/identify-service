@@ -49,6 +49,27 @@ func TestLocalStorageUsesContentTypeExtensions(t *testing.T) {
 	}
 }
 
+func TestLocalStorageSaveRemovesPreviousImageFormat(t *testing.T) {
+	storage := NewLocalStorage(t.TempDir(), "/images")
+	if _, err := storage.Save(context.Background(), "user-id", []byte("jpg"), "image/jpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Save(context.Background(), "user-id", []byte("png"), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(storage.directory, "user-id.jpg")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old image still exists or unexpected error: %v", err)
+	}
+	stored, err := os.ReadFile(filepath.Join(storage.directory, "user-id.png"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(stored) != "png" {
+		t.Fatalf("stored data = %q, want png", stored)
+	}
+}
+
 func TestLocalStorageRejectsUnsupportedContentType(t *testing.T) {
 	storage := NewLocalStorage(t.TempDir(), "/images")
 	_, err := storage.Save(context.Background(), "user-id", []byte("data"), "image/webp")

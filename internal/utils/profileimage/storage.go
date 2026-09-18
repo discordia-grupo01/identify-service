@@ -31,6 +31,8 @@ func imageExtension(contentType string) (string, bool) {
 	return extension, ok
 }
 
+var profileImageExtensions = []string{".jpg", ".png", ".gif"}
+
 func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, contentType string) (string, error) {
 	select {
 	case <-ctx.Done():
@@ -64,6 +66,14 @@ func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, con
 	}
 	if err := os.Rename(temporaryName, path); err != nil {
 		return "", err
+	}
+	for _, otherExtension := range profileImageExtensions {
+		if otherExtension == extension {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.directory, userID+otherExtension)); err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
 	}
 
 	return s.baseURL + "/" + filename, nil

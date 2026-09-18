@@ -52,14 +52,17 @@ func TestSupabaseStorageSaveAndDelete(t *testing.T) {
 		t.Fatalf("Delete() error = %v", err)
 	}
 
-	if len(requests) != 2 {
-		t.Fatalf("request count = %d, want 2", len(requests))
+	if len(requests) != 4 {
+		t.Fatalf("request count = %d, want 4", len(requests))
 	}
 	if requests[0].method != http.MethodPost || requests[0].path != "/storage/v1/object/profile-images/user-id.png" || requests[0].body != "image bytes" {
 		t.Fatalf("upload request = %+v", requests[0])
 	}
-	if requests[1].method != http.MethodDelete || requests[1].path != "/storage/v1/object/profile-images/user-id.png" {
-		t.Fatalf("delete request = %+v", requests[1])
+	if requests[3].method != http.MethodDelete || requests[3].path != "/storage/v1/object/profile-images/user-id.png" {
+		t.Fatalf("delete request = %+v", requests[3])
+	}
+	if requests[1].path != "/storage/v1/object/profile-images/user-id.jpg" || requests[2].path != "/storage/v1/object/profile-images/user-id.gif" {
+		t.Fatalf("stale-format cleanup requests = %+v, %+v", requests[1], requests[2])
 	}
 }
 

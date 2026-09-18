@@ -64,6 +64,10 @@ func (s *SupabaseStorage) Save(ctx context.Context, userID string, data []byte, 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return "", responseError(response)
 	}
+	if err := s.deleteOtherFormats(ctx, userID, objectPath); err != nil {
+		_ = s.deleteObject(context.Background(), objectPath)
+		return "", err
+	}
 
 	return s.publicBaseURL + "/" + objectPath, nil
 }
@@ -74,6 +78,10 @@ func (s *SupabaseStorage) Delete(ctx context.Context, imageURL string) error {
 		return nil
 	}
 
+	return s.deleteObject(ctx, objectPath)
+}
+
+func (s *SupabaseStorage) deleteObject(ctx context.Context, objectPath string) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.objectURL(objectPath), nil)
 	if err != nil {
 		return err
@@ -87,6 +95,19 @@ func (s *SupabaseStorage) Delete(ctx context.Context, imageURL string) error {
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return responseError(response)
+	}
+	return nil
+}
+
+func (s *SupabaseStorage) deleteOtherFormats(ctx context.Context, userID, currentObjectPath string) error {
+	for _, extension := range profileImageExtensions {
+		objectPath := userID + extension
+		if objectPath == currentObjectPath {
+			continue
+		}
+		if err := s.deleteObject(ctx, objectPath); err != nil && !strings.Contains(err.Error(), "status 404") {
+			return err
+		}
 	}
 	return nil
 }
