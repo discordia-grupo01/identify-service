@@ -22,6 +22,15 @@ func NewLocalStorage(directory string, baseURL string) *LocalStorage {
 	return &LocalStorage{directory: directory, baseURL: strings.TrimRight(baseURL, "/")}
 }
 
+func imageExtension(contentType string) (string, bool) {
+	extension, ok := map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+	}[contentType]
+	return extension, ok
+}
+
 func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, contentType string) (string, error) {
 	select {
 	case <-ctx.Done():
@@ -29,11 +38,7 @@ func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, con
 	default:
 	}
 
-	extension, ok := map[string]string{
-		"image/jpeg": ".jpg",
-		"image/png":  ".png",
-		"image/gif":  ".gif",
-	}[contentType]
+	extension, ok := imageExtension(contentType)
 	if !ok {
 		return "", fmt.Errorf("unsupported image content type %q", contentType)
 	}
