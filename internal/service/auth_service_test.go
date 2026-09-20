@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,6 +240,79 @@ func TestAuthServiceRegisterRejectsInsecurePasswords(t *testing.T) {
 				t.Fatal("insecure password must not create a user")
 			}
 		})
+	}
+}
+
+func TestAuthServiceRegisterRejectsInvalidNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		userName string
+	}{
+		{name: "empty", userName: ""},
+		{name: "only whitespace", userName: "   "},
+		{name: "longer than 100 runes", userName: strings.Repeat("a", MaxNameRunes+1)},
+		{name: "disallowed characters", userName: "Ada<script>"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &userRepositoryStub{}
+			service := NewAuthService(repo, nil)
+
+			response, err := service.Register(context.Background(), model.RegisterRequest{
+				Name:     test.userName,
+				Email:    "ada@example.com",
+				Password: "SecurePass1",
+			})
+
+			if !errors.Is(err, ErrInvalidProfileName) {
+				t.Fatalf("Register() error = %v, want ErrInvalidProfileName", err)
+			}
+			if response != nil || repo.createdUser != nil {
+				t.Fatal("invalid name must not create a user")
+			}
+		})
+	}
+}
+
+// El nombre se guarda normalizado, igual que en PATCH /v1/me/profile: si no,
+// registrarse y editar el perfil dejarian valores distintos para el mismo dato.
+func TestAuthServiceRegisterNormalizesName(t *testing.T) {
+	repo := &userRepositoryStub{}
+	service := NewAuthService(repo, nil)
+
+	response, err := service.Register(context.Background(), model.RegisterRequest{
+		Name:     "  Ada   Lovelace  ",
+		Email:    "ada@example.com",
+		Password: "SecurePass1",
+	})
+	if err != nil {
+		t.Fatalf("Register() error = %v, want nil", err)
+	}
+
+	if repo.createdUser.Name != "Ada Lovelace" {
+		t.Fatalf("persisted name = %q, want %q", repo.createdUser.Name, "Ada Lovelace")
+	}
+	if response.Name != "Ada Lovelace" {
+		t.Fatalf("response name = %q, want %q", response.Name, "Ada Lovelace")
+	}
+}
+
+func TestAuthServiceRegisterAcceptsNameAtMaxLength(t *testing.T) {
+	repo := &userRepositoryStub{}
+	service := NewAuthService(repo, nil)
+
+	maxName := strings.Repeat("a", MaxNameRunes)
+	if _, err := service.Register(context.Background(), model.RegisterRequest{
+		Name:     maxName,
+		Email:    "ada@example.com",
+		Password: "SecurePass1",
+	}); err != nil {
+		t.Fatalf("Register() error = %v, want nil", err)
+	}
+
+	if repo.createdUser.Name != maxName {
+		t.Fatalf("persisted name length = %d, want %d", len(repo.createdUser.Name), MaxNameRunes)
 	}
 }
 
