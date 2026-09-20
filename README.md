@@ -42,6 +42,11 @@ make run
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
 | PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
 | PROFILE_IMAGE_URL | /uploads/profile-images | URL publica base de las imagenes de perfil. |
+| PROFILE_IMAGE_STORAGE | local | Backend de imagenes: `local` o `supabase`. |
+| SUPABASE_URL | - | URL del proyecto Supabase, necesaria con `PROFILE_IMAGE_STORAGE=supabase`. |
+| SUPABASE_SERVICE_ROLE_KEY | - | Clave privada del servidor para Supabase Storage. Nunca exponerla al navegador. |
+| PROFILE_IMAGE_BUCKET | profile-images | Bucket publico de Supabase Storage. |
+| PROFILE_IMAGE_PUBLIC_URL | - | URL publica opcional del bucket; por defecto se construye desde `SUPABASE_URL`. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
@@ -136,7 +141,20 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 
 Ver `openapi.yaml` para el detalle de cada request/response.
 
-Las imagenes locales se guardan en `PROFILE_IMAGE_DIR` y se sirven desde `PROFILE_IMAGE_URL`. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo por Oracle Object Storage sin cambiar el servicio de perfil.
+Las imagenes se almacenan localmente cuando `PROFILE_IMAGE_STORAGE=local`, y se sirven desde `PROFILE_IMAGE_URL`. Con `PROFILE_IMAGE_STORAGE=supabase`, se suben al bucket `PROFILE_IMAGE_BUCKET` mediante la API de Supabase Storage y se devuelve su URL publica; en ese modo el bucket debe ser publico. `SUPABASE_SERVICE_ROLE_KEY` solo se usa en el backend y nunca debe llegar al navegador. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo sin cambiar el servicio de perfil.
+
+### Supabase Storage
+
+Crear el bucket `profile-images` en **Storage** y marcarlo como publico. Luego configurar:
+
+```env
+PROFILE_IMAGE_STORAGE=supabase
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<server-only-key>
+PROFILE_IMAGE_BUCKET=profile-images
+```
+
+La clave `service_role` tiene privilegios elevados: guardarla solo como secreto del entorno del servicio. `PROFILE_IMAGE_PUBLIC_URL` solo es necesario si las imagenes se sirven mediante un dominio CDN o proxy propio.
 
 ## Eventos que publica
 Todavia no publica eventos (no hay integracion con RabbitMQ implementada).

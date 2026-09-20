@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/events"
@@ -60,14 +61,13 @@ func main() {
 	}
 	passwordRecoveryService := service.NewPasswordRecoveryService(passwordRecoveryRepo, userRepo, emailService)
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
-	profileImageStorage := profileimage.NewLocalStorage(
-		getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"),
-		getEnv("PROFILE_IMAGE_URL", "/uploads/profile-images"),
-	)
+	profileImageStorage := newProfileImageStorage()
 	membershipRepo := repository.NewServerMembershipRepository(dbConnection)
 	profileService := service.NewProfileService(userRepo, profileImageStorage, membershipRepo)
 	profileHandler := handler.NewProfileHandler(profileService)
-	router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
+	if strings.EqualFold(getEnv("PROFILE_IMAGE_STORAGE", "local"), "local") {
+		router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
+	}
 
 	// El consumer de RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un
 	// entorno sin la dependencia levantada) el resto del servicio sigue
@@ -132,4 +132,28 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func newProfileImageStorage() profileimage.Storage {
+	switch strings.ToLower(getEnv("PROFILE_IMAGE_STORAGE", "local")) {
+	case "local":
+		return profileimage.NewLocalStorage(
+			getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"),
+			getEnv("PROFILE_IMAGE_URL", "/uploads/profile-images"),
+		)
+	case "supabase":
+		storage, err := profileimage.NewSupabaseStorage(
+			getEnv("SUPABASE_URL", ""),
+			getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+			getEnv("PROFILE_IMAGE_BUCKET", "profile-images"),
+			getEnv("PROFILE_IMAGE_PUBLIC_URL", ""),
+		)
+		if err != nil {
+			log.Fatalf("invalid Supabase image storage configuration: %v", err)
+		}
+		return storage
+	default:
+		log.Fatalf("unsupported PROFILE_IMAGE_STORAGE %q: use local or supabase", getEnv("PROFILE_IMAGE_STORAGE", "local"))
+		return nil
+	}
 }
