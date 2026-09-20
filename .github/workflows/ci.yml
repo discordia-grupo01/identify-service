@@ -61,3 +61,79 @@ jobs:
       - name: Migrar la base de test
         run: migrate -path=migrations -database "postgres://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME?sslmode=$DATABASE_SSLMODE" up
       - run: go test ./... -cover
+
+  # Construye la imagen y la publica en Artifact Registry. Solo corre en push a
+  # main y despues de que pase `test`. Se autentica con Workload Identity
+  # Federation (sin claves de larga duracion).
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: us-central1-docker.pkg.dev/discordia-509215/discordia-servers/servicio-identify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configurar Docker para Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      - name: Construir imagen
+        run: docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+      - name: Publicar imagen
+        run: |
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+  # Despliega la imagen del commit en discordia-vm. Entra por SSH a traves de un
+  # tunel IAP (el puerto 22 no hace falta abrirlo a internet). La clave SSH solo
+  # puede ejecutar ~/deploy.sh en la VM (ver deploy/deploy.sh), que valida el tag,
+  # recrea el contenedor, hace smoke test de /readyz y vuelve atras si falla.
+  deploy:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-identity
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VM_USER: manup
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      VM_SSH_HOST_KEY: ${{ vars.VM_SSH_HOST_KEY }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Desplegar en discordia-vm
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "[localhost]:2222 $VM_SSH_HOST_KEY" > ~/.ssh/known_hosts
+
+          gcloud compute start-iap-tunnel discordia-vm 22 \
+            --local-host-port=localhost:2222 \
+            --zone us-central1-a --project discordia-509215 > /tmp/iap.log 2>&1 &
+          TUNNEL_PID=$!
+          trap 'kill $TUNNEL_PID 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 20); do
+            if nc -z localhost 2222; then break; fi
+            sleep 1
+          done
+          nc -z localhost 2222 || { echo "No se pudo abrir el tunel IAP"; cat /tmp/iap.log; exit 1; }
+
+          ssh -i ~/.ssh/deploy_key -p 2222 \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VM_USER@localhost" "${{ github.sha }}"
