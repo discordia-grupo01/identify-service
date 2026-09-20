@@ -3,6 +3,279 @@ info:
   title: Discordia - SERVICIO
   version: "1.0.0"
 paths:
+  /v1/users:
+    post:
+      summary: Registrar un usuario
+      description: Crea una cuenta nueva. Para autenticarse se debe usar el endpoint de login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        "201":
+          description: Usuario registrado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "400":
+          description: Datos inválidos o contraseña insegura
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: El correo electrónico ya está registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/login:
+    post:
+      summary: Iniciar sesión
+      description: Autentica con email y contraseña. Devuelve un access token de corta duración en el body y establece el refresh token como cookie httpOnly (no viaja en el body).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        "200":
+          description: Login exitoso
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400": { description: Datos de entrada inválidos }
+        "401": { description: Credenciales inválidas }
+        "500": { description: Error interno }
+  /v1/oauth/google:
+    post:
+      summary: Login con proveedor federado (Google)
+      description: >-
+        Valida el ID token emitido por Google (obtenido en el cliente vía
+        Google Identity Services / expo-auth-session) y autentica al
+        usuario: si ya existe una identidad vinculada, inicia sesión con esa
+        cuenta; si no, busca una cuenta con el mismo email para vincularla, o
+        crea una cuenta nueva. Devuelve la misma forma de respuesta que
+        /v1/login (access token en el body, refresh token como cookie
+        httpOnly).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleLoginRequest'
+      responses:
+        "200":
+          description: Login exitoso (cuenta nueva o vinculada a una existente)
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400": { description: Falta el id_token }
+        "401": { description: El id_token es inválido, expiró, o el email no está verificado }
+        "503": { description: No se pudo contactar al proveedor externo (Google); el cliente debe ofrecer login con email y contraseña }
+        "500": { description: Error interno }
+  /v1/refresh:
+    post:
+      summary: Renovar la sesión
+      description: Rota el refresh token (enviado automáticamente como cookie httpOnly) y emite un access token nuevo junto con un refresh token nuevo. Si el refresh token ya había sido rotado y se reutiliza, se asume robo y se revoca toda la sesión.
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
+      responses:
+        "200":
+          description: Sesión renovada
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "401": { description: Refresh token ausente, inválido, expirado o reutilizado tras haber sido rotado }
+        "500": { description: Error interno }
+  /v1/logout:
+    post:
+      summary: Cerrar sesión
+      description: Revoca el refresh token de la sesión actual (enviado automáticamente como cookie httpOnly) y limpia la cookie. El access token vigente en ese momento sigue siendo válido hasta su expiración natural, pero ya no puede renovarse.
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
+      responses:
+        "204": { description: Sesión invalidada }
+        "401": { description: Refresh token ausente, expirado o ya revocado }
+        "500": { description: Error interno }
+  /v1/password-recovery:
+    post:
+      summary: Solicitar recuperación de contraseña
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoveryRequest'
+      responses:
+        "202": { description: Respuesta genérica, exista o no el correo }
+        "400": { description: Datos de entrada inválidos }
+        "429": { description: Límite de solicitudes excedido }
+        "500": { description: Error interno }
+  /v1/password-reset:
+    post:
+      summary: Definir una nueva contraseña
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        "200": { description: Contraseña actualizada y enlace invalidado }
+        "400": { description: Contraseña inválida o enlace expirado/usado }
+        "500": { description: Error interno }
+  /v1/me/profile:
+    get:
+      summary: Obtener el perfil del usuario autenticado
+      description: Devuelve la información del perfil correspondiente al token Bearer provisto.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Perfil obtenido correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "401":
+          description: Sesión inválida o expirada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Usuario inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Editar el perfil del usuario autenticado
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        "200":
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "400": { description: Datos de perfil o imagen inválidos }
+        "401": { description: Sesión inválida o expirada }
+        "404": { description: Usuario inexistente }
+        "500": { description: Error interno }
+  /v1/me/status:
+    put:
+      summary: Fijar o actualizar el estado personalizado del usuario autenticado
+      description: Cada campo es independiente entre sí. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia. Al menos uno de los dos debe estar presente.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusUpdateRequest'
+      responses:
+        "200":
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "400": { description: JSON inválido, ningún campo presente, o texto/emoji inválido }
+        "401": { description: Sesión inválida o expirada }
+        "404": { description: Usuario inexistente }
+        "500": { description: Error interno }
+    delete:
+      summary: Limpiar el estado personalizado del usuario autenticado
+      description: "Operación idempotente: borrar un estado ya vacío también responde 204."
+      security:
+        - bearerAuth: []
+      responses:
+        "204": { description: Estado limpiado }
+        "401": { description: Sesión inválida o expirada }
+        "404": { description: Usuario inexistente }
+        "500": { description: Error interno }
+  /v1/users/{id}:
+    get:
+      summary: Obtener el perfil público de un usuario
+      description: Devuelve los campos públicos del usuario indicado (nombre, descripción, avatar, estado, servidores en común). No incluye email ni fecha de registro.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Perfil público obtenido correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUserResponse'
+        "400":
+          description: El id no es un UUID válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Sesión inválida o expirada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Usuario inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /livez:
     get:
       summary: Liveness check
@@ -14,3 +287,144 @@ paths:
       responses:
         "200": { description: OK }
         "503": { description: Dependencias no disponibles }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    RefreshTokenCookie:
+      name: refresh_token
+      in: cookie
+      required: true
+      description: Refresh token httpOnly enviado automáticamente por el navegador. No se establece manualmente desde el cliente.
+      schema:
+        type: string
+  headers:
+    SetRefreshTokenCookie:
+      description: Establece (o limpia, en logout) el refresh token como cookie httpOnly, Secure y SameSite=Strict.
+      schema:
+        type: string
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Debe incluir al menos una mayúscula, una minúscula y un número.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    GoogleLoginRequest:
+      type: object
+      required: [id_token]
+      properties:
+        id_token:
+          type: string
+          description: ID token JWT emitido por Google, con audiencia igual a GOOGLE_CLIENT_ID.
+    PasswordRecoveryRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    PasswordResetRequest:
+      type: object
+      required: [token, new_password, confirm_password]
+      properties:
+        token: { type: string }
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+        confirm_password:
+          type: string
+          format: password
+    AuthResponse:
+      type: object
+      required: [user, access_token]
+      description: El refresh token nunca viaja en el body de la respuesta; se entrega únicamente como cookie httpOnly (ver header Set-Cookie).
+      properties:
+        user:
+          $ref: '#/components/schemas/UserResponse'
+        access_token:
+          type: string
+          description: 'JWT de corta duración (~15 minutos) para autenticar requests con el header "Authorization: Bearer".'
+    UserResponse:
+      type: object
+      required: [id, name, email, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        description: { type: string, maxLength: 500 }
+        avatar_url: { type: string, format: uri }
+        status_text: { type: string, maxLength: 64 }
+        status_emoji: { type: string, maxLength: 32 }
+        created_at: { type: string, format: date-time }
+    PublicUserResponse:
+      type: object
+      required: [id, name, avatar_url, mutual_server_ids]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, maxLength: 500 }
+        avatar_url: { type: string, format: uri }
+        status_text: { type: string, maxLength: 64 }
+        status_emoji: { type: string, maxLength: 32 }
+        mutual_server_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: IDs de los servidores que el usuario autenticado (viewer) comparte con este usuario. No incluye nombre ni ícono del servidor (se resuelven aparte contra discordia-servers). Vacío si no comparten ninguno o si viewer == target.
+    StatusUpdateRequest:
+      type: object
+      description: Al menos uno de los dos campos debe estar presente. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia.
+      properties:
+        status_text:
+          type: string
+          maxLength: 64
+          description: Sin caracteres de control.
+        status_emoji:
+          type: string
+          maxLength: 32
+          description: Sin caracteres de control.
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Letras Unicode, números, espacios, apóstrofes, guiones y puntos.
+        description:
+          type: string
+          maxLength: 500
+        image:
+          type: string
+          format: binary
+          description: Imagen JPEG, PNG o GIF de hasta 5 MiB y 4096x4096 píxeles.
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: object
+              additionalProperties: true
