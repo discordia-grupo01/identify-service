@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -144,6 +145,7 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 				Message: "El usuario no existe",
 			}})
 		default:
+			log.Printf("profile update failed for user %v: %v", userID, err)
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
 				Code:    "INTERNAL_SERVER_ERROR",
 				Message: "Ha ocurrido un error inesperado en el servidor",

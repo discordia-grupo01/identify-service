@@ -3,6 +3,8 @@ package profileimage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,7 +107,8 @@ func (s *SupabaseStorage) deleteOtherFormats(ctx context.Context, userID, curren
 		if objectPath == currentObjectPath {
 			continue
 		}
-		if err := s.deleteObject(ctx, objectPath); err != nil && !strings.Contains(err.Error(), "status 404") {
+		var storageErr *storageError
+		if err := s.deleteObject(ctx, objectPath); err != nil && !(errors.As(err, &storageErr) && storageErr.notFound()) {
 			return err
 		}
 	}
@@ -136,7 +139,37 @@ func (s *SupabaseStorage) addHeaders(request *http.Request, contentType string) 
 	}
 }
 
+// storageError es la respuesta de error de Supabase Storage.
+type storageError struct {
+	status     int
+	statusText string
+	body       string
+}
+
+func (e *storageError) Error() string {
+	return fmt.Sprintf("supabase storage request failed with status %s: %s", e.statusText, e.body)
+}
+
+// notFound indica que el objeto no existe. Supabase Storage no siempre usa HTTP 404
+// para eso: suele responder HTTP 400 con "statusCode":"404" en el cuerpo.
+func (e *storageError) notFound() bool {
+	if e.status == http.StatusNotFound {
+		return true
+	}
+	var payload struct {
+		StatusCode any `json:"statusCode"`
+	}
+	if err := json.Unmarshal([]byte(e.body), &payload); err != nil {
+		return false
+	}
+	return fmt.Sprint(payload.StatusCode) == "404"
+}
+
 func responseError(response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-	return fmt.Errorf("supabase storage request failed with status %s: %s", response.Status, strings.TrimSpace(string(body)))
+	return &storageError{
+		status:     response.StatusCode,
+		statusText: response.Status,
+		body:       strings.TrimSpace(string(body)),
+	}
 }
