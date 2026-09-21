@@ -120,6 +120,66 @@ paths:
         "204": { description: Sesión invalidada }
         "401": { description: Refresh token ausente, expirado o ya revocado }
         "500": { description: Error interno }
+  /v1/pin:
+    post:
+      summary: Activar el PIN de acceso rápido en este dispositivo
+      description: >-
+        Activa (o reemplaza, si ya existía uno) el PIN numérico de 6 dígitos
+        para este dispositivo (historia "Registro con PIN"). Requiere sesión
+        activa: el usuario se toma del access token, no del body. El PIN se
+        guarda hasheado con bcrypt, nunca en texto plano.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigurePinRequest'
+      responses:
+        "204": { description: PIN activado correctamente }
+        "400":
+          description: Falta el pin o el device_id, o el PIN no tiene el formato esperado (6 dígitos numéricos)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401": { description: Sesión inválida o expirada }
+        "500":
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/pin/login:
+    post:
+      summary: Iniciar sesión rápida con PIN
+      description: >-
+        Autentica únicamente con el PIN y el device_id, sin pedir email
+        (historia "Registro con PIN"). Solo funciona en un dispositivo que ya
+        tiene un PIN configurado (ver POST /v1/pin): en cualquier otro
+        dispositivo no hay PIN asociado y este endpoint siempre falla.
+        Devuelve la misma forma de respuesta que /v1/login (access token en
+        el body, refresh token como cookie httpOnly).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinLoginRequest'
+      responses:
+        "200":
+          description: Login exitoso
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400": { description: Falta el pin o el device_id }
+        "401": { description: El PIN es incorrecto, o este dispositivo no tiene un PIN configurado }
+        "500": { description: Error interno }
   /v1/password-recovery:
     post:
       summary: Solicitar recuperación de contraseña
@@ -335,6 +395,26 @@ components:
         id_token:
           type: string
           description: ID token JWT emitido por Google, con audiencia igual a GOOGLE_CLIENT_ID.
+    ConfigurePinRequest:
+      type: object
+      required: [pin, device_id]
+      properties:
+        pin:
+          type: string
+          pattern: '^\d{6}$'
+          description: PIN numérico de exactamente 6 dígitos.
+        device_id:
+          type: string
+          description: Identificador random generado y persistido por el cliente (no un ID de hardware). Único por instalación; a lo sumo un PIN activo por device_id.
+    PinLoginRequest:
+      type: object
+      required: [pin, device_id]
+      properties:
+        pin:
+          type: string
+          pattern: '^\d{6}$'
+        device_id:
+          type: string
     PasswordRecoveryRequest:
       type: object
       required: [email]

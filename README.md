@@ -131,6 +131,8 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `POST /v1/login` - login. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
 - `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).
 - `POST /v1/logout` - revoca el refresh token de la sesion actual (via cookie) y limpia la cookie. El access token vigente en ese momento sigue siendo valido hasta que expira solo (maximo ~15 min), pero ya no se puede renovar.
+- `POST /v1/pin` - activa (o reemplaza) el PIN de acceso rapido de 6 digitos para este dispositivo (historia "Registro con PIN"). Requiere Bearer JWT; el PIN se guarda hasheado con bcrypt, nunca en texto plano.
+- `POST /v1/pin/login` - login rapido solo con PIN y `device_id`, sin pedir email. Solo funciona en un dispositivo que ya tiene un PIN configurado via `POST /v1/pin`; en cualquier otro dispositivo no hay PIN asociado y siempre falla. Devuelve la misma forma de respuesta que `/v1/login`.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
