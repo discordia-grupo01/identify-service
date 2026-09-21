@@ -106,6 +106,9 @@ func main() {
 		c.String(http.StatusOK, "discordia-SERVICIO up")
 	})
 
+	// Pagina de rebote para el login con Google desde Expo Go
+	router.GET("/oauth/mobile-callback", handler.MobileOAuthCallback)
+
 	api := router.Group("/v1")
 	{
 		api.POST("/users", authHandler.Register)
