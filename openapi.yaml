@@ -124,8 +124,8 @@ paths:
     post:
       summary: Activar el PIN de acceso rápido en este dispositivo
       description: >-
-        Activa (o reemplaza, si ya existía uno) el PIN numérico de 6 dígitos
-        para este dispositivo (historia "Registro con PIN"). Requiere sesión
+        Activa (o reemplaza, si ya existía uno) el PIN numérico de 6 a 8
+        dígitos para este dispositivo (historia "Registro con PIN"). Requiere sesión
         activa: el usuario se toma del access token, no del body. El PIN se
         guarda hasheado con bcrypt, nunca en texto plano.
       security:
@@ -139,7 +139,7 @@ paths:
       responses:
         "204": { description: PIN activado correctamente }
         "400":
-          description: Falta el pin o el device_id, o el PIN no tiene el formato esperado (6 dígitos numéricos)
+          description: Falta el pin o el device_id, o el PIN no tiene el formato esperado (6 a 8 dígitos numéricos)
           content:
             application/json:
               schema:
@@ -401,8 +401,8 @@ components:
       properties:
         pin:
           type: string
-          pattern: '^\d{6}$'
-          description: PIN numérico de exactamente 6 dígitos.
+          pattern: '^\d{6,8}$'
+          description: PIN numérico de 6 a 8 dígitos.
         device_id:
           type: string
           description: Identificador random generado y persistido por el cliente (no un ID de hardware). Único por instalación; a lo sumo un PIN activo por device_id.
@@ -412,7 +412,7 @@ components:
       properties:
         pin:
           type: string
-          pattern: '^\d{6}$'
+          pattern: '^\d{6,8}$'
         device_id:
           type: string
     PasswordRecoveryRequest:

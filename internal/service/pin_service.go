@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	ErrPinInvalidFormat = errors.New("el PIN debe tener exactamente 6 dígitos numéricos")
+	ErrPinInvalidFormat = errors.New("el PIN debe tener entre 6 y 8 dígitos numéricos")
 	ErrPinNotConfigured = errors.New("este dispositivo no tiene un PIN configurado")
 	ErrPinIncorrect     = errors.New("el PIN ingresado es incorrecto")
 )
 
-var pinFormat = regexp.MustCompile(`^\d{6}$`)
+var pinFormat = regexp.MustCompile(`^\d{6,8}$`)
 
 type PinService interface {
 	ConfigurePin(ctx context.Context, userID string, deviceID string, pin string) error

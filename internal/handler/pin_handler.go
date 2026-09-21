@@ -41,7 +41,7 @@ func (h *PinHandler) Configure(c *gin.Context) {
 				Error: model.APIError{
 					Code:    "INVALID_PIN",
 					Message: err.Error(),
-					Details: map[string]any{"pin_length": 6},
+					Details: map[string]any{"pin_min_length": 6, "pin_max_length": 8},
 				},
 			})
 			return

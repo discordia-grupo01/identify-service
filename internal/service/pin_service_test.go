@@ -37,9 +37,20 @@ func (r *devicePinRepositoryStub) Upsert(_ context.Context, pin *model.DevicePin
 func TestPinServiceConfigurePinRejectsInvalidFormat(t *testing.T) {
 	svc := NewPinService(newDevicePinRepositoryStub(), &userRepositoryStub{}, newRefreshTokenRepositoryStub())
 
-	for _, pin := range []string{"", "12345", "1234567", "12a456", "abcdef"} {
+	for _, pin := range []string{"", "12345", "123456789", "12a45678", "abcdefgh"} {
 		if err := svc.ConfigurePin(context.Background(), "user-1", "device-1", pin); !errors.Is(err, ErrPinInvalidFormat) {
-			t.Fatalf("ConfigurePin(%q) error = %v, want ErrPinInvalidFormat (CA1: 6 dígitos numéricos)", pin, err)
+			t.Fatalf("ConfigurePin(%q) error = %v, want ErrPinInvalidFormat (CA1: 6 a 8 dígitos numéricos)", pin, err)
+		}
+	}
+}
+
+func TestPinServiceConfigurePinAcceptsAnyLengthWithinTheRange(t *testing.T) {
+	for _, pin := range []string{"123456", "1234567", "12345678"} {
+		pinRepo := newDevicePinRepositoryStub()
+		svc := NewPinService(pinRepo, &userRepositoryStub{}, newRefreshTokenRepositoryStub())
+
+		if err := svc.ConfigurePin(context.Background(), "user-1", "device-1", pin); err != nil {
+			t.Fatalf("ConfigurePin(%q) error = %v, want nil (CA1: 6 a 8 dígitos numéricos)", pin, err)
 		}
 	}
 }
