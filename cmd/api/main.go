@@ -51,6 +51,9 @@ func main() {
 	googleVerifier := googleoauth.NewVerifier(getEnv("GOOGLE_CLIENT_ID", ""))
 	oauthService := service.NewOAuthService(userRepo, oauthIdentityRepo, refreshRepo, googleVerifier)
 	oauthHandler := handler.NewOAuthHandler(oauthService)
+	devicePinRepo := repository.NewDevicePinRepository(dbConnection)
+	pinService := service.NewPinService(devicePinRepo, userRepo, refreshRepo)
+	pinHandler := handler.NewPinHandler(pinService)
 	emailConfig, err := emailutil.ConfigFromEnv()
 	if err != nil {
 		log.Fatalf("invalid email configuration: %v", err)
@@ -116,6 +119,8 @@ func main() {
 		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
 		api.POST("/refresh", authHandler.Refresh)
 		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
+		api.POST("/pin", middleware.RequireAuth(), pinHandler.Configure)
+		api.POST("/pin/login", pinHandler.Login)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
