@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"time"
@@ -41,17 +42,26 @@ type AuthService interface {
 	Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 }
 
-type authService struct {
-	repo        repository.UserRepository
-	refreshRepo repository.RefreshTokenRepository
+type EmailConfirmationRequester interface {
+	RequestEmailConfirmation(ctx context.Context, request model.EmailConfirmationRequest) error
 }
 
-func NewAuthService(repo repository.UserRepository, tokenRepo ...repository.RefreshTokenRepository) AuthService {
+type authService struct {
+	repo                  repository.UserRepository
+	refreshRepo           repository.RefreshTokenRepository
+	confirmationRequester EmailConfirmationRequester
+}
+
+func NewAuthService(repo repository.UserRepository, tokenRepo repository.RefreshTokenRepository, confirmationRequester ...EmailConfirmationRequester) AuthService {
 	var refreshRepo repository.RefreshTokenRepository
-	if len(tokenRepo) > 0 {
-		refreshRepo = tokenRepo[0]
+	if tokenRepo != nil {
+		refreshRepo = tokenRepo
 	}
-	return &authService{repo: repo, refreshRepo: refreshRepo}
+	var requester EmailConfirmationRequester
+	if len(confirmationRequester) > 0 {
+		requester = confirmationRequester[0]
+	}
+	return &authService{repo: repo, refreshRepo: refreshRepo, confirmationRequester: requester}
 }
 
 func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
@@ -83,6 +93,11 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	if s.confirmationRequester != nil {
+		if err := s.confirmationRequester.RequestEmailConfirmation(ctx, model.EmailConfirmationRequest{Email: user.Email}); err != nil {
+			return nil, fmt.Errorf("send registration confirmation email: %w", err)
+		}
+	}
 
 	createdAtUTC := user.CreatedAt.UTC()
 
@@ -95,7 +110,7 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
+	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil || !user.EmailVerified {
 		return nil, ErrInvalidCredentials
 	}
 
