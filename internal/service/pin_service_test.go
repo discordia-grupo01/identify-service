@@ -94,10 +94,10 @@ func TestPinServiceConfigurePinReplacesAnExistingPinOnTheSameDevice(t *testing.T
 	}
 }
 
-func TestPinServiceLoginWithPinDoesNotRequireEmail(t *testing.T) {
+func TestPinServiceLoginWithPinAllowsVerifiedUser(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	pinRepo := newDevicePinRepositoryStub()
-	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", EmailVerified: true}
 	userRepo := &userRepositoryStub{existingUser: user}
 	svc := NewPinService(pinRepo, userRepo, newRefreshTokenRepositoryStub())
 
@@ -112,6 +112,21 @@ func TestPinServiceLoginWithPinDoesNotRequireEmail(t *testing.T) {
 	}
 	if response == nil || response.Token == "" || response.RefreshToken == "" {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestPinServiceLoginWithPinRejectsUnverifiedUser(t *testing.T) {
+	pinRepo := newDevicePinRepositoryStub()
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	svc := NewPinService(pinRepo, &userRepositoryStub{existingUser: user}, newRefreshTokenRepositoryStub())
+
+	if err := svc.ConfigurePin(context.Background(), user.ID, "device-1", "654321"); err != nil {
+		t.Fatalf("ConfigurePin() error = %v", err)
+	}
+
+	_, err := svc.LoginWithPin(context.Background(), "device-1", "654321")
+	if !errors.Is(err, ErrEmailNotVerified) {
+		t.Fatalf("LoginWithPin() error = %v, want ErrEmailNotVerified", err)
 	}
 }
 

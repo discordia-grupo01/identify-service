@@ -192,6 +192,20 @@ func TestAuthHandlerLoginUsesSameErrorForUnknownEmailAndWrongPassword(t *testing
 	}
 }
 
+func TestAuthHandlerLoginMapsEmailNotVerifiedSeparately(t *testing.T) {
+	serviceStub := &authServiceStub{err: service.ErrEmailNotVerified}
+	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Secure123"}`)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "EMAIL_NOT_VERIFIED" {
+		t.Fatalf("error code = %q, want EMAIL_NOT_VERIFIED", response.Error.Code)
+	}
+}
+
 func TestAuthHandlerLoginRejectsInvalidEmailBeforeCallingService(t *testing.T) {
 	serviceStub := &authServiceStub{}
 	recorder := performLoginRequest(t, serviceStub, `{"email":"not-an-email","password":"Secure123"}`)

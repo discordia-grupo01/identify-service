@@ -10,6 +10,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/utils/email"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type emailConfirmationRepositoryStub struct {
@@ -174,8 +175,8 @@ func TestAuthServiceLoginRejectsUnverifiedEmail(t *testing.T) {
 		EmailVerified: false,
 	}}
 	response, err := NewAuthService(repo, nil).Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
-	if !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("Login() error = %v, want ErrInvalidCredentials", err)
+	if !errors.Is(err, ErrEmailNotVerified) {
+		t.Fatalf("Login() error = %v, want ErrEmailNotVerified", err)
 	}
 	if response != nil {
 		t.Fatalf("Login() response = %+v, want nil", response)
@@ -183,7 +184,8 @@ func TestAuthServiceLoginRejectsUnverifiedEmail(t *testing.T) {
 }
 
 func HashPasswordForTest(password string) (string, error) {
-	return string([]byte(password)), nil
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(hash), err
 }
 
 func TestEmailConfirmationServiceRejectsUnknownToken(t *testing.T) {

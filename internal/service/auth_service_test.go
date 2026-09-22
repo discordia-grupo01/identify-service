@@ -471,6 +471,30 @@ func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
 	}
 }
 
+func TestAuthServiceLoginReturnsEmailNotVerifiedForValidPassword(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: false,
+	}}
+
+	response, loginErr := NewAuthService(repo, nil).Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+	})
+
+	if !errors.Is(loginErr, ErrEmailNotVerified) {
+		t.Fatalf("Login() error = %v, want ErrEmailNotVerified", loginErr)
+	}
+	if response != nil {
+		t.Fatalf("Login() response = %+v, want nil", response)
+	}
+}
+
 func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 	repositoryErr := errors.New("database unavailable")
 	repo := &userRepositoryStub{getErr: repositoryErr}

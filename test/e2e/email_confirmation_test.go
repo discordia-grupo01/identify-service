@@ -32,7 +32,7 @@ func TestEmailConfirmationEndToEnd(t *testing.T) {
 
 	loginBody, _ := json.Marshal(model.LoginRequest{Email: emailAddress, Password: password})
 	loginRecorder := doRequest(router, http.MethodPost, "/v1/login", loginBody, "")
-	if loginRecorder.Code != http.StatusUnauthorized {
+	if loginRecorder.Code != http.StatusForbidden {
 		t.Fatalf("unconfirmed login status = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
 	}
 

@@ -24,6 +24,7 @@ var (
 	ErrPasswordInsecure    = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
 	ErrEmailInUse          = errors.New("el correo electrónico ya está registrado")
 	ErrInvalidCredentials  = errors.New("correo electrónico o contraseña inválidos")
+	ErrEmailNotVerified    = errors.New("el correo electrónico todavía no fue verificado")
 	ErrInexistentSession   = errors.New("la sesión no existe o ya ha sido revocada")
 	ErrInvalidRefreshToken = errors.New("token de actualización inválido o expirado")
 	ErrRefreshReused       = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
@@ -110,8 +111,11 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	if err != nil {
 		return nil, err
 	}
-	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil || !user.EmailVerified {
+	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
 		return nil, ErrInvalidCredentials
+	}
+	if !user.EmailVerified {
+		return nil, ErrEmailNotVerified
 	}
 
 	return s.issueTokenPair(ctx, user, uuid.NewString())
