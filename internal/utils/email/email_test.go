@@ -85,3 +85,146 @@ func TestConfigFromEnvRejectsInvalidPort(t *testing.T) {
 		t.Fatalf("ConfigFromEnv() error = %v, want error containing 'SMTP_PORT'", err)
 	}
 }
+
+func TestSendEmailConfirmationEmail(t *testing.T) {
+	captured := &capturedMail{}
+
+	service := newService(Config{
+		From:    "no-reply@discordia.test",
+		AppName: "Discordia",
+	}, captured)
+
+	err := service.SendEmailConfirmationEmail(
+		EmailConfirmationRequest{
+			Email:      "ada@example.com",
+			Name:       "Ada",
+			ConfirmURL: "https://discordia.test/confirm?token=abc123",
+			ExpiresIn:  "24 horas",
+		},
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"SendEmailConfirmationEmail() error = %v",
+			err,
+		)
+	}
+
+	message := string(captured.message)
+
+	for _, expected := range []string{
+		"To: ada@example.com",
+		"Subject:",
+		"https://discordia.test/confirm?token=abc123",
+		"Discordia",
+		"24 horas",
+		"font-family:Inter,Arial,sans-serif",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Errorf(
+				"message does not contain %q",
+				expected,
+			)
+		}
+	}
+}
+
+func TestSendEmailConfirmationEmailRejectsInvalidRequest(t *testing.T) {
+	service := newService(
+		Config{
+			From:    "no-reply@discordia.test",
+			AppName: "Discordia",
+		},
+		&capturedMail{},
+	)
+
+	tests := []struct {
+		name    string
+		request EmailConfirmationRequest
+	}{
+		{
+			name: "empty email",
+			request: EmailConfirmationRequest{
+				Name:       "Ada",
+				ConfirmURL: "https://discordia.test/confirm?token=abc",
+				ExpiresIn:  "24 horas",
+			},
+		},
+		{
+			name: "invalid email",
+			request: EmailConfirmationRequest{
+				Email:      "invalid",
+				Name:       "Ada",
+				ConfirmURL: "https://discordia.test/confirm?token=abc",
+				ExpiresIn:  "24 horas",
+			},
+		},
+		{
+			name: "empty confirmation URL",
+			request: EmailConfirmationRequest{
+				Email:     "ada@example.com",
+				Name:      "Ada",
+				ExpiresIn: "24 horas",
+			},
+		},
+		{
+			name: "empty token expiration",
+			request: EmailConfirmationRequest{
+				Email:      "ada@example.com",
+				Name:       "Ada",
+				ConfirmURL: "https://discordia.test/confirm?token=abc",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.SendEmailConfirmationEmail(tt.request)
+
+			if err == nil {
+				t.Fatal(
+					"SendEmailConfirmationEmail() should return an error",
+				)
+			}
+		})
+	}
+}
+
+func TestSendEmailConfirmationEmailContainsConfirmationURL(t *testing.T) {
+	captured := &capturedMail{}
+
+	service := newService(
+		Config{
+			From:    "no-reply@discordia.test",
+			AppName: "Discordia",
+		},
+		captured,
+	)
+
+	const confirmURL = "https://discordia.test/confirm?token=super-secret-token"
+
+	err := service.SendEmailConfirmationEmail(
+		EmailConfirmationRequest{
+			Email:      "ada@example.com",
+			Name:       "Ada",
+			ConfirmURL: confirmURL,
+			ExpiresIn:  "24 horas",
+		},
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"SendEmailConfirmationEmail() error = %v",
+			err,
+		)
+	}
+
+	message := string(captured.message)
+
+	if !strings.Contains(message, confirmURL) {
+		t.Fatalf(
+			"email does not contain confirmation URL %q",
+			confirmURL,
+		)
+	}
+}
