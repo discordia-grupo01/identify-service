@@ -10,16 +10,32 @@ import (
 // acepta redirect_uri https:// para un Client ID tipo "Web application", pero
 // Expo Go solo puede volver a exp://. Esta pagina es la
 // que Google sí acepta; una vez ahi, JS del lado del navegador del celular
-// arma el salto final a exp://, algo que el navegador si permite
-
+// arma el salto final a exp://, algo que el navegador si permite.
+//
+// El exp://... real viaja en el parametro `state` de OAuth (no como query
+// param del redirect_uri, porque Google exige match exacto contra la URL
+// registrada). Con response_type=id_token Google devuelve todo en el
+// fragmento (#state=...&id_token=...), que nunca llega al servidor: por eso
+// se lee desde JS. Se reenvian todos los parametros, `state` incluido,
+// porque expo-auth-session valida que coincida con el que mando. Solo se
+// redirige a esquemas de la app para que la pagina no sirva de open redirect.
 const mobileOAuthCallbackHTML = `<!doctype html>
 <html>
   <body>
+    <p id="msg">Volviendo a la app...</p>
+    <a id="link" style="display:none">Abrir la app</a>
     <script>
       var params = new URLSearchParams(window.location.hash.slice(1));
-      var appRedirect = new URLSearchParams(window.location.search).get("app_redirect");
-      if (appRedirect) {
-        window.location.href = appRedirect + "?" + params.toString();
+      var appRedirect = params.get("state");
+      if (appRedirect && /^(exp|exps|discordia):\/\//.test(appRedirect)) {
+        var target = appRedirect + "#" + params.toString();
+        window.location.replace(target);
+        // Fallback: algunos navegadores bloquean el salto automatico a esquemas custom.
+        var link = document.getElementById("link");
+        link.href = target;
+        link.style.display = "inline";
+      } else {
+        document.getElementById("msg").textContent = "Respuesta de login invalida.";
       }
     </script>
   </body>
