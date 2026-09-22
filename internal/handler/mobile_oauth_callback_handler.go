@@ -19,6 +19,12 @@ import (
 // se lee desde JS. Se reenvian todos los parametros, `state` incluido,
 // porque expo-auth-session valida que coincida con el que mando. Solo se
 // redirige a esquemas de la app para que la pagina no sirva de open redirect.
+//
+// En Android el login corre dentro de una Chrome Custom Tab, y ahi un salto
+// automatico (sin toque del usuario) a exp://... le llega a la app recortado
+// a exp://<host>:<puerto>, sin path ni parametros. Con un link intent://
+// Chrome se lo pasa completo, asi que en Android usamos ese formato (los
+// parametros van en el query porque el # lo usa la sintaxis de intent).
 const mobileOAuthCallbackHTML = `<!doctype html>
 <html>
   <body>
@@ -27,8 +33,15 @@ const mobileOAuthCallbackHTML = `<!doctype html>
     <script>
       var params = new URLSearchParams(window.location.hash.slice(1));
       var appRedirect = params.get("state");
-      if (appRedirect && /^(exp|exps|discordia):\/\//.test(appRedirect)) {
+      var match = appRedirect && appRedirect.match(/^(exp|exps|discordia):\/\/(.*)$/);
+      if (match) {
         var target = appRedirect + "#" + params.toString();
+        if (/Android/i.test(navigator.userAgent)) {
+          var scheme = match[1];
+          var pkg = scheme === "discordia" ? "" : "package=host.exp.exponent;";
+          target = "intent://" + match[2] + "?" + params.toString() +
+            "#Intent;scheme=" + scheme + ";" + pkg + "end";
+        }
         window.location.replace(target);
         // Fallback: algunos navegadores bloquean el salto automatico a esquemas custom.
         var link = document.getElementById("link");
