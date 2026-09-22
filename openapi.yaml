@@ -207,6 +207,33 @@ paths:
         "200": { description: Contraseña actualizada y enlace invalidado }
         "400": { description: Contraseña inválida o enlace expirado/usado }
         "500": { description: Error interno }
+  /v1/email-confirmation:
+    post:
+      summary: Solicitar o reenviar confirmación de correo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailConfirmationRequest'
+      responses:
+        "202": { description: Respuesta genérica, exista o no el correo }
+        "400": { description: Datos de entrada inválidos }
+        "429": { description: Límite de solicitudes excedido }
+        "500": { description: Error interno }
+  /v1/email-confirmation/confirm:
+    post:
+      summary: Confirmar el correo electrónico de una cuenta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailConfirmationTokenRequest'
+      responses:
+        "200": { description: Correo confirmado correctamente }
+        "400": { description: Token inválido, expirado o ya utilizado }
+        "500": { description: Error interno }
   /v1/me/profile:
     get:
       summary: Obtener el perfil del usuario autenticado
@@ -432,6 +459,16 @@ components:
         confirm_password:
           type: string
           format: password
+    EmailConfirmationRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    EmailConfirmationTokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
     AuthResponse:
       type: object
       required: [user, access_token]
