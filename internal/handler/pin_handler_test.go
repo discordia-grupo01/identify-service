@@ -175,3 +175,17 @@ func TestPinHandlerLoginMapsWrongPinToUnauthorized(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestPinHandlerLoginMapsEmailNotVerifiedToForbidden(t *testing.T) {
+	serviceStub := &pinServiceStub{loginErr: service.ErrEmailNotVerified}
+	recorder := performPinLoginRequest(t, serviceStub, `{"pin":"654321","device_id":"device-1"}`)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "EMAIL_NOT_VERIFIED" {
+		t.Fatalf("error code = %q, want EMAIL_NOT_VERIFIED", response.Error.Code)
+	}
+}

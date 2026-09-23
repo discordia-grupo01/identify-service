@@ -1,12 +1,12 @@
 # identify-service
 
-Servicio de identidad de Discordia: registro, login, sesiones y recuperacion de contraseña. Es donde vive todo lo de usuarios (y, a futuro, perfil).
+Servicio de identidad de Discordia: registro, confirmacion de email, login, sesiones y recuperacion de contraseña. Es donde vive todo lo de usuarios (y, a futuro, perfil).
 
 ## Stack
 - Lenguaje: Go
 - Framework: Gin (github.com/gin-gonic/gin)
 - BDD: PostgreSQL (Supabase en produccion, ver seccion "Supabase" mas abajo)
-- Infra extra: SMTP (envio de emails de recuperacion de contraseña)
+- Infra extra: SMTP (envio de emails de confirmacion de registro y recuperacion de contraseña)
 
 ## Setup local
 ```bash
@@ -40,6 +40,9 @@ make run
 | PASSWORD_RESET_URL | http://localhost:3000/reset-password | URL base del frontend para recuperar la contraseña. |
 | PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
+| EMAIL_CONFIRMATION_URL | http://localhost:3000/confirm-email | URL base del frontend para confirmar el email de registro. |
+| EMAIL_CONFIRMATION_EXPIRATION | 24h | Expiracion del enlace de confirmacion. |
+| EMAIL_CONFIRMATION_MAX_ATTEMPTS | 3 | Solicitudes de confirmacion permitidas por email en una hora. |
 | PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
 | PROFILE_IMAGE_URL | /uploads/profile-images | URL publica base de las imagenes de perfil. |
 | PROFILE_IMAGE_STORAGE | local | Backend de imagenes: `local` o `supabase`. |
@@ -58,12 +61,12 @@ identify-service/
 │       ├── main.go          entrypoint: arma el router y levanta el server
 │       └── database.go       conexion a Postgres (initDB)
 ├── internal/
-│   ├── handler/              handlers HTTP: auth (registro/login/logout) y password recovery
-│   ├── service/               logica de negocio (auth_service, password_recovery_service)
-│   ├── repository/            acceso a datos: users, refresh_tokens, password_recoveries
+│   ├── handler/              handlers HTTP: auth, confirmacion de email y password recovery
+│   ├── service/               logica de negocio: auth, confirmacion y password recovery
+│   ├── repository/            acceso a datos: users, refresh_tokens, email_confirmations y password_recoveries
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
-│   ├── utils/email/            envio de emails (SMTP) para recuperacion de contraseña
+│   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
 │   └── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
@@ -106,6 +109,8 @@ DATABASE_HOST=localhost RABBITMQ_URL=amqp://guest:guest@localhost:5672/ \
   go test ./test/e2e/... -run TestMutualServersRabbitMQPipeline -v
 ```
 
+Los tests e2e comprueban el flujo real de confirmacion: el login se rechaza antes de confirmar, el reenvio invalida el token anterior, el token nuevo se consume una sola vez y el login se habilita despues de confirmar.
+
 ## Supabase (produccion)
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
 
@@ -124,11 +129,13 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
    DATABASE_SSLMODE=require
    DATABASE_SCHEMA=identify
    ```
-3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200) y un `POST /v1/users` + `POST /v1/login` de prueba.
+3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200). Un `POST /v1/users` envia un email de confirmacion; el login devuelve 401 hasta confirmar el token recibido mediante `POST /v1/email-confirmation/confirm`.
 
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
-- `POST /v1/login` - login. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/email-confirmation` - solicita o reenvia el email de confirmacion. Responde de forma generica para no revelar si un email esta registrado y aplica un limite de solicitudes.
+- `POST /v1/email-confirmation/confirm` - confirma el email usando el token recibido. El token es de un solo uso y expira segun `EMAIL_CONFIRMATION_EXPIRATION`.
 - `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).
 - `POST /v1/logout` - revoca el refresh token de la sesion actual (via cookie) y limpia la cookie. El access token vigente en ese momento sigue siendo valido hasta que expira solo (maximo ~15 min), pero ya no se puede renovar.
 - `POST /v1/pin` - activa (o reemplaza) el PIN de acceso rapido (6 a 8 digitos) para este dispositivo (historia "Registro con PIN"). Requiere Bearer JWT; el PIN se guarda hasheado con bcrypt, nunca en texto plano.

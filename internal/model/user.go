@@ -6,22 +6,28 @@ import (
 )
 
 type User struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	Email        string         `json:"email"`
-	Description  string         `json:"description"`
-	AvatarURL    string         `json:"avatar_url"`
-	StatusText   string         `json:"status_text"`
-	StatusEmoji  string         `json:"status_emoji"`
-	PasswordHash sql.NullString `json:"-"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Email         string         `json:"email"`
+	Description   string         `json:"description"`
+	AvatarURL     string         `json:"avatar_url"`
+	StatusText    string         `json:"status_text"`
+	StatusEmoji   string         `json:"status_emoji"`
+	EmailVerified bool           `json:"email_verified"`
+	VerifiedAt    *time.Time     `json:"verified_at,omitempty"`
+	PasswordHash  sql.NullString `json:"-"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 type RegisterRequest struct {
 	Name     string `json:"name" binding:"required"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
+}
+
+type EmailConfirmationTokenRequest struct {
+	Token string `json:"token" binding:"required"`
 }
 
 type LoginRequest struct {
@@ -42,14 +48,15 @@ type AuthResponse struct {
 }
 
 type UserResponse struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Email       string    `json:"email"`
-	Description string    `json:"description"`
-	AvatarURL   string    `json:"avatar_url"`
-	StatusText  string    `json:"status_text"`
-	StatusEmoji string    `json:"status_emoji"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Email         string    `json:"email"`
+	Description   string    `json:"description"`
+	AvatarURL     string    `json:"avatar_url"`
+	StatusText    string    `json:"status_text"`
+	StatusEmoji   string    `json:"status_emoji"`
+	EmailVerified bool      `json:"email_verified"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type RefreshToken struct {
@@ -94,14 +101,15 @@ type StatusUpdateRequest struct {
 
 func NewUserResponse(user *User) *UserResponse {
 	return &UserResponse{
-		ID:          user.ID,
-		Name:        user.Name,
-		Email:       user.Email,
-		Description: user.Description,
-		AvatarURL:   user.AvatarURL,
-		StatusText:  user.StatusText,
-		StatusEmoji: user.StatusEmoji,
-		CreatedAt:   user.CreatedAt.UTC(),
+		ID:            user.ID,
+		Name:          user.Name,
+		Email:         user.Email,
+		Description:   user.Description,
+		AvatarURL:     user.AvatarURL,
+		StatusText:    user.StatusText,
+		StatusEmoji:   user.StatusEmoji,
+		EmailVerified: user.EmailVerified,
+		CreatedAt:     user.CreatedAt.UTC(),
 	}
 }
 

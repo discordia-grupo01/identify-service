@@ -75,6 +75,11 @@ func (h *PinHandler) Login(c *gin.Context) {
 	res, err := h.service.LoginWithPin(c.Request.Context(), req.DeviceID, req.Pin)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrEmailNotVerified):
+			c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
+				Code:    "EMAIL_NOT_VERIFIED",
+				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
+			}})
 		case errors.Is(err, service.ErrPinNotConfigured), errors.Is(err, service.ErrPinIncorrect), errors.Is(err, service.ErrPinInvalidFormat):
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
 				Error: model.APIError{

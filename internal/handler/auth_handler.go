@@ -93,7 +93,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	res, err := h.service.Login(c.Request.Context(), req)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
+		switch {
+		case errors.Is(err, service.ErrEmailNotVerified):
+			c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
+				Code:    "EMAIL_NOT_VERIFIED",
+				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
+			}})
+			return
+		case errors.Is(err, service.ErrInvalidCredentials):
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
 				Error: model.APIError{
 					Code:    "INVALID_CREDENTIALS",

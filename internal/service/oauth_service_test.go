@@ -48,6 +48,10 @@ func (r *oauthUserRepositoryStub) UpdateProfile(_ context.Context, _ string, _ s
 	return nil
 }
 
+func (r *oauthUserRepositoryStub) UpdateEmailVerification(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
 func (r *oauthUserRepositoryStub) UpdateStatus(_ context.Context, _ string, _ *string, _ *string) (*model.User, error) {
 	return nil, nil
 }
