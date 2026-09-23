@@ -80,6 +80,9 @@ func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin stri
 	if user == nil {
 		return nil, ErrPinNotConfigured
 	}
+	if !user.EmailVerified {
+		return nil, ErrEmailNotVerified
+	}
 
 	return issueTokenPair(ctx, s.refreshRepo, user, uuid.NewString())
 }

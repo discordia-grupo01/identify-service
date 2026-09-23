@@ -97,10 +97,11 @@ func (s *oauthService) findOrCreateUser(ctx context.Context, claims *googleoauth
 		// CA1: no existe cuenta con ese email, se crea una nueva asociada al
 		// proveedor externo. Sin password: solo puede iniciar sesion via OAuth.
 		user = &model.User{
-			ID:        uuid.NewString(),
-			Name:      claims.Name,
-			Email:     claims.Email,
-			AvatarURL: claims.Picture,
+			ID:            uuid.NewString(),
+			Name:          claims.Name,
+			Email:         claims.Email,
+			AvatarURL:     claims.Picture,
+			EmailVerified: true,
 		}
 		if err := s.userRepo.Create(ctx, user); err != nil {
 			return nil, err

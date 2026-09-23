@@ -60,6 +60,7 @@ paths:
                 $ref: '#/components/schemas/AuthResponse'
         "400": { description: Datos de entrada inválidos }
         "401": { description: Credenciales inválidas }
+        "403": { description: El email todavía no fue verificado (código EMAIL_NOT_VERIFIED) }
         "500": { description: Error interno }
   /v1/oauth/google:
     post:
@@ -179,6 +180,7 @@ paths:
                 $ref: '#/components/schemas/AuthResponse'
         "400": { description: Falta el pin o el device_id }
         "401": { description: El PIN es incorrecto, o este dispositivo no tiene un PIN configurado }
+        "403": { description: El email de la cuenta todavía no fue verificado (código EMAIL_NOT_VERIFIED) }
         "500": { description: Error interno }
   /v1/password-recovery:
     post:
@@ -206,6 +208,33 @@ paths:
       responses:
         "200": { description: Contraseña actualizada y enlace invalidado }
         "400": { description: Contraseña inválida o enlace expirado/usado }
+        "500": { description: Error interno }
+  /v1/email-confirmation:
+    post:
+      summary: Solicitar o reenviar confirmación de correo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailConfirmationRequest'
+      responses:
+        "202": { description: Respuesta genérica, exista o no el correo }
+        "400": { description: Datos de entrada inválidos }
+        "429": { description: Límite de solicitudes excedido }
+        "500": { description: Error interno }
+  /v1/email-confirmation/confirm:
+    post:
+      summary: Confirmar el correo electrónico de una cuenta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailConfirmationTokenRequest'
+      responses:
+        "200": { description: Correo confirmado correctamente }
+        "400": { description: Token inválido, expirado o ya utilizado }
         "500": { description: Error interno }
   /v1/me/profile:
     get:
@@ -432,6 +461,16 @@ components:
         confirm_password:
           type: string
           format: password
+    EmailConfirmationRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    EmailConfirmationTokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
     AuthResponse:
       type: object
       required: [user, access_token]
