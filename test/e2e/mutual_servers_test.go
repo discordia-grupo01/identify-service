@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/events-contract/broker"
+	"github.com/discordia-grupo01/events-contract/envelope"
+	"github.com/discordia-grupo01/events-contract/membership"
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -252,11 +255,11 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo))
 	go consumer.Start(ctx)
 
-	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
-		EventID: "77777777-7777-7777-7777-777777777777", ServerID: serverAliceAndBob, UserID: aliceID, OccurredAt: time.Now().UTC(),
+	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberJoined, membership.MemberJoined{
+		Meta: envelope.Meta{EventID: "77777777-7777-7777-7777-777777777777", OccurredAt: time.Now().UTC()}, ServerID: serverAliceAndBob, UserID: aliceID,
 	})
-	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
-		EventID: "88888888-8888-8888-8888-888888888888", ServerID: serverAliceAndBob, UserID: bobID, OccurredAt: time.Now().UTC(),
+	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberJoined, membership.MemberJoined{
+		Meta: envelope.Meta{EventID: "88888888-8888-8888-8888-888888888888", OccurredAt: time.Now().UTC()}, ServerID: serverAliceAndBob, UserID: bobID,
 	})
 
 	waitForCondition(t, 10*time.Second, func() bool {
@@ -271,8 +274,8 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 		return len(publicProfile.MutualServerIDs) == 1 && publicProfile.MutualServerIDs[0] == serverAliceAndBob
 	}, "el consumer no reflejó los eventos publicados en el endpoint")
 
-	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberLeft, events.EventPayload{
-		EventID: "99999999-9999-9999-9999-999999999999", ServerID: serverAliceAndBob, UserID: aliceID, OccurredAt: time.Now().UTC(),
+	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberLeft, membership.MemberJoined{
+		Meta: envelope.Meta{EventID: "99999999-9999-9999-9999-999999999999", OccurredAt: time.Now().UTC()}, ServerID: serverAliceAndBob, UserID: aliceID,
 	})
 
 	waitForCondition(t, 10*time.Second, func() bool {
@@ -313,8 +316,8 @@ func TestConsumerReconnectsAfterConnectionDrop(t *testing.T) {
 
 	serverID := "66666666-1111-2222-3333-444444444444"
 
-	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
-		EventID: "aaaaaaaa-1111-1111-1111-111111111111", ServerID: serverID, UserID: "user-before-drop", OccurredAt: time.Now().UTC(),
+	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberJoined, membership.MemberJoined{
+		Meta: envelope.Meta{EventID: "aaaaaaaa-1111-1111-1111-111111111111", OccurredAt: time.Now().UTC()}, ServerID: serverID, UserID: "user-before-drop",
 	})
 	waitForCondition(t, 10*time.Second, func() bool {
 		return membershipIsActive(t, membershipRepo, "user-before-drop", serverID)
@@ -325,8 +328,8 @@ func TestConsumerReconnectsAfterConnectionDrop(t *testing.T) {
 	// Publicar inmediatamente después de cerrar la conexión: si Start() no
 	// reconectara, este evento se quedaría en la cola sin consumir para
 	// siempre y el waitForCondition de abajo fallaría por timeout.
-	publishMembershipEvent(t, rabbitMQURL, events.RoutingKeyMemberJoined, events.EventPayload{
-		EventID: "bbbbbbbb-2222-2222-2222-222222222222", ServerID: serverID, UserID: "user-after-drop", OccurredAt: time.Now().UTC(),
+	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberJoined, membership.MemberJoined{
+		Meta: envelope.Meta{EventID: "bbbbbbbb-2222-2222-2222-222222222222", OccurredAt: time.Now().UTC()}, ServerID: serverID, UserID: "user-after-drop",
 	})
 	waitForCondition(t, 15*time.Second, func() bool {
 		return membershipIsActive(t, membershipRepo, "user-after-drop", serverID)
@@ -445,15 +448,15 @@ func declareAndPurgeMembershipQueue(t *testing.T, rabbitMQURL string) {
 	}
 	defer ch.Close()
 
-	if err := ch.ExchangeDeclare(events.ExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := ch.ExchangeDeclare(broker.ExchangeName, broker.ExchangeType, true, false, false, false, nil); err != nil {
 		t.Fatalf("ExchangeDeclare() error = %v", err)
 	}
 	queue, err := ch.QueueDeclare(events.QueueName, true, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("QueueDeclare() error = %v", err)
 	}
-	for _, routingKey := range []string{events.RoutingKeyMemberJoined, events.RoutingKeyMemberLeft} {
-		if err := ch.QueueBind(queue.Name, routingKey, events.ExchangeName, false, nil); err != nil {
+	for _, routingKey := range []string{membership.RoutingKeyMemberJoined, membership.RoutingKeyMemberLeft} {
+		if err := ch.QueueBind(queue.Name, routingKey, broker.ExchangeName, false, nil); err != nil {
 			t.Fatalf("QueueBind() error = %v", err)
 		}
 	}
@@ -462,7 +465,7 @@ func declareAndPurgeMembershipQueue(t *testing.T, rabbitMQURL string) {
 	}
 }
 
-func publishMembershipEvent(t *testing.T, rabbitMQURL string, routingKey string, payload events.EventPayload) {
+func publishMembershipEvent(t *testing.T, rabbitMQURL string, routingKey string, payload membership.MemberJoined) {
 	t.Helper()
 
 	conn, err := amqp.Dial(rabbitMQURL)
@@ -477,7 +480,7 @@ func publishMembershipEvent(t *testing.T, rabbitMQURL string, routingKey string,
 	}
 	defer ch.Close()
 
-	if err := ch.ExchangeDeclare(events.ExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := ch.ExchangeDeclare(broker.ExchangeName, broker.ExchangeType, true, false, false, false, nil); err != nil {
 		t.Fatalf("ExchangeDeclare() error = %v", err)
 	}
 
@@ -488,7 +491,7 @@ func publishMembershipEvent(t *testing.T, rabbitMQURL string, routingKey string,
 
 	publishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := ch.PublishWithContext(publishCtx, events.ExchangeName, routingKey, false, false, amqp.Publishing{
+	if err := ch.PublishWithContext(publishCtx, broker.ExchangeName, routingKey, false, false, amqp.Publishing{
 		ContentType: "application/json",
 		Body:        body,
 	}); err != nil {

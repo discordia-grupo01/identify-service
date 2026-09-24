@@ -7,28 +7,20 @@ import (
 	"log"
 	"time"
 
+	"github.com/discordia-grupo01/events-contract/broker"
+	"github.com/discordia-grupo01/events-contract/membership"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const (
-	ExchangeName = "discordia.events"
-	QueueName    = "identify.server_memberships"
-
-	RoutingKeyMemberJoined = "servers.member_joined"
-	RoutingKeyMemberLeft   = "servers.member_left"
-)
-
-type EventPayload struct {
-	EventID    string    `json:"event_id"`
-	ServerID   string    `json:"server_id"`
-	UserID     string    `json:"user_id"`
-	OccurredAt time.Time `json:"occurred_at"`
-}
+// QueueName is specific to this consumer, unlike the exchange/routing keys
+// (shared with the publisher via events-contract) -- no other service binds
+// this queue.
+const QueueName = "identify.server_memberships"
 
 type MembershipHandler interface {
-	HandleMemberJoined(ctx context.Context, payload EventPayload) error
-	HandleMemberLeft(ctx context.Context, payload EventPayload) error
+	HandleMemberJoined(ctx context.Context, payload membership.MemberJoined) error
+	HandleMemberLeft(ctx context.Context, payload membership.MemberLeft) error
 }
 
 type Consumer struct {
@@ -82,15 +74,15 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 	}
 	defer ch.Close()
 
-	if err := ch.ExchangeDeclare(ExchangeName, "topic", true, false, false, false, nil); err != nil {
+	if err := ch.ExchangeDeclare(broker.ExchangeName, broker.ExchangeType, true, false, false, false, nil); err != nil {
 		return err
 	}
 	queue, err := ch.QueueDeclare(QueueName, true, false, false, false, nil)
 	if err != nil {
 		return err
 	}
-	for _, routingKey := range []string{RoutingKeyMemberJoined, RoutingKeyMemberLeft} {
-		if err := ch.QueueBind(queue.Name, routingKey, ExchangeName, false, nil); err != nil {
+	for _, routingKey := range []string{membership.RoutingKeyMemberJoined, membership.RoutingKeyMemberLeft} {
+		if err := ch.QueueBind(queue.Name, routingKey, broker.ExchangeName, false, nil); err != nil {
 			return err
 		}
 	}
@@ -126,12 +118,15 @@ func (c *Consumer) handleDelivery(ctx context.Context, delivery amqp.Delivery) {
 // Handler para manejo de errores en un envio de mensajes por diferentes factores como errores de red, errores de base de datos, etc.
 // Devuelve true si el mensaje debe reintentarse, false si se descarta.
 func shouldRequeue(ctx context.Context, handler MembershipHandler, routingKey string, body []byte) bool {
-	if routingKey != RoutingKeyMemberJoined && routingKey != RoutingKeyMemberLeft {
+	if routingKey != membership.RoutingKeyMemberJoined && routingKey != membership.RoutingKeyMemberLeft {
 		log.Printf("events: routing key desconocida %q, descartando mensaje", routingKey)
 		return false
 	}
 
-	var payload EventPayload
+	// MemberJoined and MemberLeft share the same wire shape, so decoding into
+	// MemberJoined here (regardless of which one this actually is) is fine --
+	// it's only used to read/validate fields before dispatching below.
+	var payload membership.MemberJoined
 	if err := json.Unmarshal(body, &payload); err != nil {
 		log.Printf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
 		return false
@@ -152,10 +147,10 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, routingKey st
 
 	var err error
 	switch routingKey {
-	case RoutingKeyMemberJoined:
+	case membership.RoutingKeyMemberJoined:
 		err = handler.HandleMemberJoined(ctx, payload)
-	case RoutingKeyMemberLeft:
-		err = handler.HandleMemberLeft(ctx, payload)
+	case membership.RoutingKeyMemberLeft:
+		err = handler.HandleMemberLeft(ctx, membership.MemberLeft{Meta: payload.Meta, ServerID: payload.ServerID, UserID: payload.UserID})
 	}
 	if err != nil {
 		log.Printf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, payload.EventID, err)

@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 
+	"github.com/discordia-grupo01/events-contract/membership"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 )
 
@@ -14,10 +15,10 @@ func NewMembershipHandler(repo repository.ServerMembershipRepository) Membership
 	return &membershipHandler{repo: repo}
 }
 
-func (h *membershipHandler) HandleMemberJoined(ctx context.Context, payload EventPayload) error {
+func (h *membershipHandler) HandleMemberJoined(ctx context.Context, payload membership.MemberJoined) error {
 	return h.repo.Upsert(ctx, payload.UserID, payload.ServerID, true, payload.OccurredAt)
 }
 
-func (h *membershipHandler) HandleMemberLeft(ctx context.Context, payload EventPayload) error {
+func (h *membershipHandler) HandleMemberLeft(ctx context.Context, payload membership.MemberLeft) error {
 	return h.repo.Upsert(ctx, payload.UserID, payload.ServerID, false, payload.OccurredAt)
 }
