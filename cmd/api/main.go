@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +22,15 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// @title        Discordia - Identity
+// @version      1.0.0
+// @description  Identity/auth service: registration, login (password, Google OAuth, device PIN), sessions, password recovery, email confirmation, profile.
+// @description  Routes under /v1/me and /v1/users require identity: the JWT is validated by Kong at the gateway (or by this service's own middleware.RequireAuth when hit directly).
+// @BasePath     /
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Type "Bearer" followed by a space and the JWT.
 func main() {
 	environment := getEnv("ENVIRONMENT", "development")
 	host := getEnv("HOST", "0.0.0.0")
@@ -86,27 +96,8 @@ func main() {
 		log.Println("RABBITMQ_URL no configurada: el consumer de membership no se inicia")
 	}
 
-	// /livez: solo confirma que el proceso esta vivo. No toca la BDD.
-	router.GET("/livez", func(c *gin.Context) {
-		c.String(http.StatusOK, "ok")
-	})
-
-	// /readyz: confirma que el servicio puede operar (chequear BDD aca).
-	router.GET("/readyz", func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-		defer cancel()
-
-		// Verifica que la conexión a la base de datos responda
-		if err := dbConnection.PingContext(ctx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "unhealthy",
-				"error":  "database connection failed",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"status": "ready"})
-	})
+	router.GET("/livez", livez)
+	router.GET("/readyz", readyz(dbConnection))
 
 	router.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, "discordia-SERVICIO up")
@@ -138,6 +129,38 @@ func main() {
 	addr := host + ":" + port
 	log.Printf("listening on %s", addr)
 	log.Fatal(router.Run(addr))
+}
+
+// livez godoc
+// @Summary  Liveness check
+// @Tags     ops
+// @Success  200  "ok"
+// @Router   /livez [get]
+func livez(c *gin.Context) { c.String(http.StatusOK, "ok") }
+
+// readyz godoc
+// @Summary      Readiness check
+// @Description  Also pings the database.
+// @Tags         ops
+// @Produce      json
+// @Success      200  "ready"
+// @Failure      503  "database unavailable"
+// @Router       /readyz [get]
+func readyz(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := db.PingContext(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "unhealthy",
+				"error":  "database connection failed",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	}
 }
 
 func getEnv(key, fallback string) string {

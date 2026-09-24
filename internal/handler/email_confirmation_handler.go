@@ -17,6 +17,17 @@ func NewEmailConfirmationHandler(emailConfirmationService service.EmailConfirmat
 	return &EmailConfirmationHandler{service: emailConfirmationService}
 }
 
+// Request godoc
+// @Summary      Request an email confirmation link
+// @Description  Always responds 202 regardless of whether the email is registered or already confirmed. Rate-limited per email.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  model.EmailConfirmationRequest  true  "Email"
+// @Success      202  {object}  map[string]string
+// @Failure      400  {object}  model.ErrorResponse
+// @Failure      429  {object}  model.ErrorResponse  "too many requests for this email"
+// @Router       /v1/email-confirmation [post]
 func (h *EmailConfirmationHandler) Request(c *gin.Context) {
 	var request model.EmailConfirmationRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -45,6 +56,15 @@ func (h *EmailConfirmationHandler) Request(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "Si el correo está registrado y aún no fue confirmado, recibirás un enlace de confirmación"})
 }
 
+// Confirm godoc
+// @Summary      Confirm an email address using its token
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  model.EmailConfirmationTokenRequest  true  "Confirmation token"
+// @Success      200  {object}  map[string]string
+// @Failure      400  {object}  model.ErrorResponse  "invalid, expired, or already used token"
+// @Router       /v1/email-confirmation/confirm [post]
 func (h *EmailConfirmationHandler) Confirm(c *gin.Context) {
 	var request model.EmailConfirmationTokenRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
