@@ -5,3 +5,4 @@
 /api
 storage/
 .mcp.json
+/.openapi-tmp/

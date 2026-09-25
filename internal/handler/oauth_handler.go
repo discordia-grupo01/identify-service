@@ -26,6 +26,18 @@ type googleLoginRequest struct {
 // CA2 (vincula a una cuenta existente por email) y CA3 (si Google no
 // responde, devuelve 503 para que el cliente ofrezca el login con
 // email/contrasena como alternativa).
+// LoginWithGoogle godoc
+// @Summary      Log in / sign up with Google
+// @Description  CA1: creates a new account if the email is new. CA2: links to an existing account by email. CA3: 503 if Google is unreachable, so the client can offer email/password login instead.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  googleLoginRequest  true  "Google ID token"
+// @Success      200  {object}  model.AuthResponse
+// @Failure      400  {object}  model.ErrorResponse  "missing id_token"
+// @Failure      401  {object}  model.ErrorResponse  "token could not be validated"
+// @Failure      503  {object}  model.ErrorResponse  "Google unreachable"
+// @Router       /v1/oauth/google [post]
 func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {
 	var req googleLoginRequest
 

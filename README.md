@@ -67,17 +67,18 @@ identify-service/
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
-│   └── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   ├── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   └── audit/                  registra cada evento recibido (tabla consumed_events), procesado o descartado
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml            gofmt, build, vet y test en cada PR/push a main
 ├── .githooks/
 │   └── pre-commit             hook de gofmt local
-├── openapi.yaml               contrato de la API REST
+├── openapi.yaml               contrato de la API REST -- generado (make openapi), no se edita a mano
 ├── docker-compose.yml         levanta el servicio + Postgres para desarrollo local
 ├── Dockerfile                 build multi-stage para la imagen de produccion
-├── Makefile                   comandos run/test/build/migrate
+├── Makefile                   comandos run/test/build/migrate/openapi
 └── .env.example                estructura de variables de entorno (sin valores sensibles)
 ```
 `internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go).
@@ -87,6 +88,7 @@ identify-service/
 - `make test` - corre los tests con cobertura (`go test ./... -cover`).
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - corre las migraciones (golang-migrate) contra la BDD que indique `.env` (local o Supabase).
+- `make openapi` - regenera `openapi.yaml` desde las anotaciones swag de los handlers (`internal/handler/**`). Necesita Go y Node. No hace falta correrlo a mano: el CI lo corre en cada push/PR y, si detecta que cambió, commitea `openapi.yaml` solo de vuelta a la rama.
 
 ## Tests
 ```bash
@@ -148,7 +150,14 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `PUT /v1/me/status` - fija o actualiza el estado personalizado (status_text, status_emoji). Cada campo es independiente: omitirlo no lo toca, mandarlo vacio lo limpia. Requiere Bearer JWT.
 - `DELETE /v1/me/status` - limpia el estado personalizado (idempotente). Requiere Bearer JWT.
 
-Ver `openapi.yaml` para el detalle de cada request/response.
+Ver [`openapi.yaml`](openapi.yaml) para el detalle de cada request/response --
+**generado automáticamente y actualizado solo**, no se edita a mano ni hace
+falta correr nada vos. Sale de las anotaciones `@Summary`/`@Param`/`@Success`/
+etc. (swag) arriba de cada handler en `internal/handler/**`. En cada
+push/PR, el CI corre `make openapi` (swag → swagger2openapi, de Swagger 2.0
+a OpenAPI 3.0) y si el resultado cambió respecto a lo commiteado, lo
+commitea de vuelta a la rama solo. Si querés verlo antes de pushear,
+`make openapi` local hace lo mismo (necesita Go y Node).
 
 Las imagenes se almacenan localmente cuando `PROFILE_IMAGE_STORAGE=local`, y se sirven desde `PROFILE_IMAGE_URL`. Con `PROFILE_IMAGE_STORAGE=supabase`, se suben al bucket `PROFILE_IMAGE_BUCKET` mediante la API de Supabase Storage y se devuelve su URL publica; en ese modo el bucket debe ser publico. `SUPABASE_SERVICE_ROLE_KEY` solo se usa en el backend y nunca debe llegar al navegador. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo sin cambiar el servicio de perfil.
 
@@ -170,6 +179,17 @@ Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
+
+**Auditoría**: cada entrega (procesada o descartada) queda registrada en
+`consumed_events` -- `internal/audit`, llamado desde `shouldRequeue` en
+`internal/events/consumer.go`. Un evento válido se identifica por
+`event_id` (upsert: reintentos del mismo evento actualizan la misma fila,
+`attempts` cuenta cuántas veces); un payload malformado o una routing key
+desconocida no tienen `event_id` parseable, así que cada uno genera su
+propia fila (no hay upsert posible, y tampoco se reintregan -- se
+descartan con ack inmediato). Sirve para comparar contra `outbox_events`
+de `servers` y detectar un evento que se publicó pero nunca llegó -- una
+falla en este registro nunca afecta el ack/nack real (es best-effort).
 
 ## Health checks
 - GET /livez

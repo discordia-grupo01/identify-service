@@ -93,7 +93,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
