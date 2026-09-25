@@ -67,7 +67,8 @@ identify-service/
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
-│   └── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   ├── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   └── audit/                  registra cada evento recibido (tabla consumed_events), procesado o descartado
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
 │   └── workflows/
@@ -178,6 +179,17 @@ Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
+
+**Auditoría**: cada entrega (procesada o descartada) queda registrada en
+`consumed_events` -- `internal/audit`, llamado desde `shouldRequeue` en
+`internal/events/consumer.go`. Un evento válido se identifica por
+`event_id` (upsert: reintentos del mismo evento actualizan la misma fila,
+`attempts` cuenta cuántas veces); un payload malformado o una routing key
+desconocida no tienen `event_id` parseable, así que cada uno genera su
+propia fila (no hay upsert posible, y tampoco se reintregan -- se
+descartan con ack inmediato). Sirve para comparar contra `outbox_events`
+de `servers` y detectar un evento que se publicó pero nunca llegó -- una
+falla en este registro nunca afecta el ack/nack real (es best-effort).
 
 ## Health checks
 - GET /livez
