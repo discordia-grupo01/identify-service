@@ -65,7 +65,7 @@ func (r *Recorder) Record(ctx context.Context, e Entry) {
 	if _, err := r.db.ExecContext(ctx, `
 		INSERT INTO consumed_events (id, event_id, routing_key, raw_body, status, processed_at, error)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (event_id) DO UPDATE SET
+		ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO UPDATE SET
 			status       = EXCLUDED.status,
 			attempts     = consumed_events.attempts + 1,
 			processed_at = EXCLUDED.processed_at,
