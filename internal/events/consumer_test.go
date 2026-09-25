@@ -31,7 +31,7 @@ func (s *membershipHandlerStub) HandleMemberLeft(_ context.Context, payload memb
 func TestShouldRequeueDiscardsUnknownRoutingKey(t *testing.T) {
 	handler := &membershipHandlerStub{}
 
-	requeue := shouldRequeue(context.Background(), handler, "servers.server_deleted", []byte(`{}`))
+	requeue := shouldRequeue(context.Background(), handler, nil, "servers.server_deleted", []byte(`{}`))
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -44,7 +44,7 @@ func TestShouldRequeueDiscardsUnknownRoutingKey(t *testing.T) {
 func TestShouldRequeueDiscardsMalformedPayload(t *testing.T) {
 	handler := &membershipHandlerStub{}
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberJoined, []byte(`not-json`))
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, []byte(`not-json`))
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -65,7 +65,7 @@ func TestShouldRequeueDiscardsInvalidServerID(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento: un server_id inválido es un error permanente, no transitorio)")
@@ -86,7 +86,7 @@ func TestShouldRequeueDiscardsEmptyUserID(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberLeft, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberLeft, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -100,7 +100,7 @@ func TestShouldRequeueOnTransientHandlerFailure(t *testing.T) {
 	handler := &membershipHandlerStub{joinedErr: errors.New("database unavailable")}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if !requeue {
 		t.Fatalf("shouldRequeue() = false, want true (nack + requeue ante fallo transitorio)")
@@ -114,7 +114,7 @@ func TestShouldRequeueDispatchesMemberJoined(t *testing.T) {
 	handler := &membershipHandlerStub{}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false")
@@ -128,7 +128,7 @@ func TestShouldRequeueDispatchesMemberLeft(t *testing.T) {
 	handler := &membershipHandlerStub{}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, membership.RoutingKeyMemberLeft, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberLeft, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false")

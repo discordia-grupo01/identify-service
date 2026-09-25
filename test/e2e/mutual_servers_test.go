@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/discordia-grupo01/events-contract/broker"
 	"github.com/discordia-grupo01/events-contract/envelope"
 	"github.com/discordia-grupo01/events-contract/membership"
+	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -252,7 +254,7 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo))
+	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo), audit.NewRecorder(db))
 	go consumer.Start(ctx)
 
 	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberJoined, membership.MemberJoined{
@@ -273,6 +275,12 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 		}
 		return len(publicProfile.MutualServerIDs) == 1 && publicProfile.MutualServerIDs[0] == serverAliceAndBob
 	}, "el consumer no reflejó los eventos publicados en el endpoint")
+
+	// La auditoría (consumed_events) debe reflejar ambos MemberJoined como
+	// procesados -- es lo que permite comparar, del otro lado, contra
+	// outbox_events de servers y detectar un evento que nunca llegó.
+	assertConsumedEventStatus(t, db, "77777777-7777-7777-7777-777777777777", "processed")
+	assertConsumedEventStatus(t, db, "88888888-8888-8888-8888-888888888888", "processed")
 
 	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberLeft, membership.MemberJoined{
 		Meta: envelope.Meta{EventID: "99999999-9999-9999-9999-999999999999", OccurredAt: time.Now().UTC()}, ServerID: serverAliceAndBob, UserID: aliceID,
@@ -311,7 +319,7 @@ func TestConsumerReconnectsAfterConnectionDrop(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo))
+	consumer := events.NewConsumer(rabbitMQURL, events.NewMembershipHandler(membershipRepo), audit.NewRecorder(db))
 	go consumer.Start(ctx)
 
 	serverID := "66666666-1111-2222-3333-444444444444"
@@ -352,6 +360,20 @@ func membershipIsActive(t *testing.T, membershipRepo repository.ServerMembership
 		}
 	}
 	return false
+}
+
+// assertConsumedEventStatus verifica que el consumer haya dejado un registro
+// de auditoría para eventID con el status esperado -- consumed_events es la
+// contraparte, del lado consumidor, de outbox_events en servers.
+func assertConsumedEventStatus(t *testing.T, db *sql.DB, eventID, wantStatus string) {
+	t.Helper()
+	var gotStatus string
+	if err := db.QueryRow(`SELECT status FROM consumed_events WHERE event_id = $1`, eventID).Scan(&gotStatus); err != nil {
+		t.Fatalf("consumed_events row for event_id=%s: %v", eventID, err)
+	}
+	if gotStatus != wantStatus {
+		t.Errorf("consumed_events.status for event_id=%s = %q, want %q", eventID, gotStatus, wantStatus)
+	}
 }
 
 // connectionNameForTest debe coincidir con el nombre de conexión que

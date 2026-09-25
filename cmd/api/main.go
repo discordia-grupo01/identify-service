@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
@@ -90,7 +91,7 @@ func main() {
 	// funcionando normalmente, solo sin "servidores en común" actualizados.
 	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
-		consumer := events.NewConsumer(rabbitMQURL, membershipHandler)
+		consumer := events.NewConsumer(rabbitMQURL, membershipHandler, audit.NewRecorder(dbConnection))
 		go consumer.Start(context.Background())
 	} else {
 		log.Println("RABBITMQ_URL no configurada: el consumer de membership no se inicia")
