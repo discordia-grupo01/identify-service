@@ -42,6 +42,17 @@ func (r *userRepositoryStub) Create(_ context.Context, user *model.User) error {
 	return nil
 }
 
+func (r *userRepositoryStub) UpdateEmailVerification(_ context.Context, _ string, _ bool) error {
+	if r.existingUser == nil {
+		r.existingUser = &model.User{}
+	}
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	r.existingUser.EmailVerified = true
+	return nil
+}
+
 func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name string, description string, avatarURL string) error {
 	if r.updateErr != nil {
 		return r.updateErr
@@ -374,11 +385,12 @@ func TestAuthServiceLoginReturnsUserAndTokens(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           "550e8400-e29b-41d4-a716-446655440000",
-		Name:         "Ada Lovelace",
-		Email:        "ada@example.com",
-		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
-		CreatedAt:    time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Name:          "Ada Lovelace",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+		CreatedAt:     time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 
@@ -417,10 +429,11 @@ func TestAuthServiceLoginCreatesUniqueExpiringTokens(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           "550e8400-e29b-41d4-a716-446655440000",
-		Name:         "Ada Lovelace",
-		Email:        "ada@example.com",
-		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Name:          "Ada Lovelace",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 	authService := NewAuthService(repo, refreshRepo)
@@ -481,9 +494,10 @@ func TestAuthServiceLoginPropagatesRefreshTokenPersistenceError(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           "550e8400-e29b-41d4-a716-446655440000",
-		Email:        "ada@example.com",
-		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 	repositoryErr := errors.New("database unavailable")
@@ -531,6 +545,30 @@ func TestAuthServiceLoginDoesNotRevealInvalidCredentialReason(t *testing.T) {
 	}
 }
 
+func TestAuthServiceLoginReturnsEmailNotVerifiedForValidPassword(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: false,
+	}}
+
+	response, loginErr := NewAuthService(repo, nil).Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+	})
+
+	if !errors.Is(loginErr, ErrEmailNotVerified) {
+		t.Fatalf("Login() error = %v, want ErrEmailNotVerified", loginErr)
+	}
+	if response != nil {
+		t.Fatalf("Login() response = %+v, want nil", response)
+	}
+}
+
 func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 	repositoryErr := errors.New("database unavailable")
 	repo := &userRepositoryStub{getErr: repositoryErr}
@@ -563,10 +601,11 @@ func loginTestUser(t *testing.T, refreshRepo *refreshTokenRepositoryStub) (*user
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	repo := &userRepositoryStub{existingUser: &model.User{
-		ID:           "550e8400-e29b-41d4-a716-446655440000",
-		Name:         "Ada Lovelace",
-		Email:        "ada@example.com",
-		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Name:          "Ada Lovelace",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
 	}}
 	response, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
 		Email:    "ada@example.com",

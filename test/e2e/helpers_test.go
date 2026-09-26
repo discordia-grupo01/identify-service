@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/discordia-grupo01/identify-service/internal/handler"
@@ -19,6 +21,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
+	"github.com/discordia-grupo01/identify-service/internal/utils/email"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +29,44 @@ import (
 )
 
 const testJWTSecret = "e2e-test-secret"
+
+type e2eConfirmationMailer struct {
+	mu       sync.Mutex
+	messages map[string][]email.EmailConfirmationRequest
+}
+
+func (m *e2eConfirmationMailer) SendEmailConfirmationEmail(request email.EmailConfirmationRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.messages == nil {
+		m.messages = make(map[string][]email.EmailConfirmationRequest)
+	}
+	m.messages[request.Email] = append(m.messages[request.Email], request)
+	return nil
+}
+
+func (m *e2eConfirmationMailer) latest(emailAddress string) (email.EmailConfirmationRequest, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messages := m.messages[emailAddress]
+	if len(messages) == 0 {
+		return email.EmailConfirmationRequest{}, false
+	}
+	return messages[len(messages)-1], true
+}
+
+func confirmationToken(t *testing.T, request email.EmailConfirmationRequest) string {
+	t.Helper()
+	parsed, err := url.Parse(request.ConfirmURL)
+	if err != nil {
+		t.Fatalf("parse confirmation URL: %v", err)
+	}
+	token := parsed.Query().Get("token")
+	if token == "" {
+		t.Fatal("confirmation email did not contain a token")
+	}
+	return token
+}
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -52,7 +93,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
@@ -79,9 +120,18 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 
 	userRepo := repository.NewUserRepository(db)
 	sessionRepo := repository.NewRefreshTokenRepository(db)
+	confirmationRepo := repository.NewPostgresEmailConfirmationRepository(db)
+	confirmationMailer := &e2eConfirmationMailer{}
+	confirmationService := service.NewEmailConfirmationService(
+		confirmationRepo,
+		userRepo,
+		confirmationMailer,
+		"https://e2e.example.com/confirm-email",
+	)
 
-	authService := service.NewAuthService(userRepo, sessionRepo)
+	authService := service.NewAuthService(userRepo, sessionRepo, confirmationService)
 	authHandler := handler.NewAuthHandler(authService)
+	confirmationHandler := handler.NewEmailConfirmationHandler(confirmationService)
 
 	profileStorage := profileimage.NewLocalStorage(t.TempDir(), "/uploads/profile-images")
 	membershipRepo := repository.NewServerMembershipRepository(db)
@@ -92,6 +142,8 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
+		api.POST("/email-confirmation", confirmationHandler.Request)
+		api.POST("/email-confirmation/confirm", confirmationHandler.Confirm)
 		api.POST("/refresh", authHandler.Refresh)
 		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
 		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
@@ -100,8 +152,20 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
 		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
 	}
+	e2eMailers.Store(router, confirmationMailer)
 
 	return router
+}
+
+var e2eMailers sync.Map
+
+func confirmationMailerFor(t *testing.T, router *gin.Engine) *e2eConfirmationMailer {
+	t.Helper()
+	mailer, ok := e2eMailers.Load(router)
+	if !ok {
+		t.Fatal("confirmation mailer was not registered for test router")
+	}
+	return mailer.(*e2eConfirmationMailer)
 }
 
 // registerAndLogin crea un usuario real (POST /v1/users) y lo loguea
@@ -125,6 +189,21 @@ func registerAndLoginSession(t *testing.T, router *gin.Engine, name string, emai
 
 	loginBody, _ := json.Marshal(model.LoginRequest{Email: email, Password: password})
 	loginRecorder := doRequest(router, http.MethodPost, "/v1/login", loginBody, "")
+	if loginRecorder.Code != http.StatusForbidden {
+		t.Fatalf("unconfirmed login status = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+
+	confirmationRequest, ok := confirmationMailerFor(t, router).latest(email)
+	if !ok {
+		t.Fatalf("registration did not send a confirmation email to %s", email)
+	}
+	confirmBody, _ := json.Marshal(model.EmailConfirmationTokenRequest{Token: confirmationToken(t, confirmationRequest)})
+	confirmRecorder := doRequest(router, http.MethodPost, "/v1/email-confirmation/confirm", confirmBody, "")
+	if confirmRecorder.Code != http.StatusOK {
+		t.Fatalf("confirmation status = %d, body = %s", confirmRecorder.Code, confirmRecorder.Body.String())
+	}
+
+	loginRecorder = doRequest(router, http.MethodPost, "/v1/login", loginBody, "")
 	if loginRecorder.Code != http.StatusOK {
 		t.Fatalf("login status = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
 	}

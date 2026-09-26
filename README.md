@@ -1,12 +1,12 @@
 # identify-service
 
-Servicio de identidad de Discordia: registro, login, sesiones y recuperacion de contraseña. Es donde vive todo lo de usuarios (y, a futuro, perfil).
+Servicio de identidad de Discordia: registro, confirmacion de email, login, sesiones y recuperacion de contraseña. Es donde vive todo lo de usuarios (y, a futuro, perfil).
 
 ## Stack
 - Lenguaje: Go
 - Framework: Gin (github.com/gin-gonic/gin)
 - BDD: PostgreSQL (Supabase en produccion, ver seccion "Supabase" mas abajo)
-- Infra extra: SMTP (envio de emails de recuperacion de contraseña)
+- Infra extra: SMTP (envio de emails de confirmacion de registro y recuperacion de contraseña)
 
 ## Setup local
 ```bash
@@ -40,8 +40,16 @@ make run
 | PASSWORD_RESET_URL | http://localhost:3000/reset-password | URL base del frontend para recuperar la contraseña. |
 | PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
+| EMAIL_CONFIRMATION_URL | http://localhost:3000/confirm-email | URL base del frontend para confirmar el email de registro. |
+| EMAIL_CONFIRMATION_EXPIRATION | 24h | Expiracion del enlace de confirmacion. |
+| EMAIL_CONFIRMATION_MAX_ATTEMPTS | 3 | Solicitudes de confirmacion permitidas por email en una hora. |
 | PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
 | PROFILE_IMAGE_URL | /uploads/profile-images | URL publica base de las imagenes de perfil. |
+| PROFILE_IMAGE_STORAGE | local | Backend de imagenes: `local` o `supabase`. |
+| SUPABASE_URL | - | URL del proyecto Supabase, necesaria con `PROFILE_IMAGE_STORAGE=supabase`. |
+| SUPABASE_SERVICE_ROLE_KEY | - | Clave privada del servidor para Supabase Storage. Nunca exponerla al navegador. |
+| PROFILE_IMAGE_BUCKET | profile-images | Bucket publico de Supabase Storage. |
+| PROFILE_IMAGE_PUBLIC_URL | - | URL publica opcional del bucket; por defecto se construye desde `SUPABASE_URL`. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
@@ -53,23 +61,24 @@ identify-service/
 │       ├── main.go          entrypoint: arma el router y levanta el server
 │       └── database.go       conexion a Postgres (initDB)
 ├── internal/
-│   ├── handler/              handlers HTTP: auth (registro/login/logout) y password recovery
-│   ├── service/               logica de negocio (auth_service, password_recovery_service)
-│   ├── repository/            acceso a datos: users, refresh_tokens, password_recoveries
+│   ├── handler/              handlers HTTP: auth, confirmacion de email y password recovery
+│   ├── service/               logica de negocio: auth, confirmacion y password recovery
+│   ├── repository/            acceso a datos: users, refresh_tokens, email_confirmations y password_recoveries
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
-│   ├── utils/email/            envio de emails (SMTP) para recuperacion de contraseña
-│   └── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
+│   ├── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   └── audit/                  registra cada evento recibido (tabla consumed_events), procesado o descartado
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml            gofmt, build, vet y test en cada PR/push a main
 ├── .githooks/
 │   └── pre-commit             hook de gofmt local
-├── openapi.yaml               contrato de la API REST
+├── openapi.yaml               contrato de la API REST -- generado (make openapi), no se edita a mano
 ├── docker-compose.yml         levanta el servicio + Postgres para desarrollo local
 ├── Dockerfile                 build multi-stage para la imagen de produccion
-├── Makefile                   comandos run/test/build/migrate
+├── Makefile                   comandos run/test/build/migrate/openapi
 └── .env.example                estructura de variables de entorno (sin valores sensibles)
 ```
 `internal/` esta pensado para no exponer estos paquetes fuera del modulo (restriccion de Go).
@@ -79,6 +88,7 @@ identify-service/
 - `make test` - corre los tests con cobertura (`go test ./... -cover`).
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - corre las migraciones (golang-migrate) contra la BDD que indique `.env` (local o Supabase).
+- `make openapi` - regenera `openapi.yaml` desde las anotaciones swag de los handlers (`internal/handler/**`). Necesita Go y Node. No hace falta correrlo a mano: el CI lo corre en cada push/PR y, si detecta que cambió, commitea `openapi.yaml` solo de vuelta a la rama.
 
 ## Tests
 ```bash
@@ -101,6 +111,8 @@ DATABASE_HOST=localhost RABBITMQ_URL=amqp://guest:guest@localhost:5672/ \
   go test ./test/e2e/... -run TestMutualServersRabbitMQPipeline -v
 ```
 
+Los tests e2e comprueban el flujo real de confirmacion: el login se rechaza antes de confirmar, el reenvio invalida el token anterior, el token nuevo se consume una sola vez y el login se habilita despues de confirmar.
+
 ## Supabase (produccion)
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
 
@@ -119,13 +131,17 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
    DATABASE_SSLMODE=require
    DATABASE_SCHEMA=identify
    ```
-3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200) y un `POST /v1/users` + `POST /v1/login` de prueba.
+3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200). Un `POST /v1/users` envia un email de confirmacion; el login devuelve 401 hasta confirmar el token recibido mediante `POST /v1/email-confirmation/confirm`.
 
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
-- `POST /v1/login` - login. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/email-confirmation` - solicita o reenvia el email de confirmacion. Responde de forma generica para no revelar si un email esta registrado y aplica un limite de solicitudes.
+- `POST /v1/email-confirmation/confirm` - confirma el email usando el token recibido. El token es de un solo uso y expira segun `EMAIL_CONFIRMATION_EXPIRATION`.
 - `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).
 - `POST /v1/logout` - revoca el refresh token de la sesion actual (via cookie) y limpia la cookie. El access token vigente en ese momento sigue siendo valido hasta que expira solo (maximo ~15 min), pero ya no se puede renovar.
+- `POST /v1/pin` - activa (o reemplaza) el PIN de acceso rapido (6 a 8 digitos) para este dispositivo (historia "Registro con PIN"). Requiere Bearer JWT; el PIN se guarda hasheado con bcrypt, nunca en texto plano.
+- `POST /v1/pin/login` - login rapido solo con PIN y `device_id`, sin pedir email. Solo funciona en un dispositivo que ya tiene un PIN configurado via `POST /v1/pin`; en cualquier otro dispositivo no hay PIN asociado y siempre falla. Devuelve la misma forma de respuesta que `/v1/login`.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
@@ -134,15 +150,46 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 - `PUT /v1/me/status` - fija o actualiza el estado personalizado (status_text, status_emoji). Cada campo es independiente: omitirlo no lo toca, mandarlo vacio lo limpia. Requiere Bearer JWT.
 - `DELETE /v1/me/status` - limpia el estado personalizado (idempotente). Requiere Bearer JWT.
 
-Ver `openapi.yaml` para el detalle de cada request/response.
+Ver [`openapi.yaml`](openapi.yaml) para el detalle de cada request/response --
+**generado automáticamente y actualizado solo**, no se edita a mano ni hace
+falta correr nada vos. Sale de las anotaciones `@Summary`/`@Param`/`@Success`/
+etc. (swag) arriba de cada handler en `internal/handler/**`. En cada
+push/PR, el CI corre `make openapi` (swag → swagger2openapi, de Swagger 2.0
+a OpenAPI 3.0) y si el resultado cambió respecto a lo commiteado, lo
+commitea de vuelta a la rama solo. Si querés verlo antes de pushear,
+`make openapi` local hace lo mismo (necesita Go y Node).
 
-Las imagenes locales se guardan en `PROFILE_IMAGE_DIR` y se sirven desde `PROFILE_IMAGE_URL`. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo por Oracle Object Storage sin cambiar el servicio de perfil.
+Las imagenes se almacenan localmente cuando `PROFILE_IMAGE_STORAGE=local`, y se sirven desde `PROFILE_IMAGE_URL`. Con `PROFILE_IMAGE_STORAGE=supabase`, se suben al bucket `PROFILE_IMAGE_BUCKET` mediante la API de Supabase Storage y se devuelve su URL publica; en ese modo el bucket debe ser publico. `SUPABASE_SERVICE_ROLE_KEY` solo se usa en el backend y nunca debe llegar al navegador. El servicio valida el contenido real de la imagen, acepta JPEG, PNG y GIF, limita el archivo a 5 MiB y las dimensiones a 4096x4096. El almacenamiento esta aislado detras de una interfaz para poder reemplazarlo sin cambiar el servicio de perfil.
+
+### Supabase Storage
+
+Crear el bucket `profile-images` en **Storage** y marcarlo como publico. Luego configurar:
+
+```env
+PROFILE_IMAGE_STORAGE=supabase
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<server-only-key>
+PROFILE_IMAGE_BUCKET=profile-images
+```
+
+La clave `service_role` tiene privilegios elevados: guardarla solo como secreto del entorno del servicio. `PROFILE_IMAGE_PUBLIC_URL` solo es necesario si las imagenes se sirven mediante un dominio CDN o proxy propio.
 
 ## Eventos que publica
 Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
+
+**Auditoría**: cada entrega (procesada o descartada) queda registrada en
+`consumed_events` -- `internal/audit`, llamado desde `shouldRequeue` en
+`internal/events/consumer.go`. Un evento válido se identifica por
+`event_id` (upsert: reintentos del mismo evento actualizan la misma fila,
+`attempts` cuenta cuántas veces); un payload malformado o una routing key
+desconocida no tienen `event_id` parseable, así que cada uno genera su
+propia fila (no hay upsert posible, y tampoco se reintregan -- se
+descartan con ack inmediato). Sirve para comparar contra `outbox_events`
+de `servers` y detectar un evento que se publicó pero nunca llegó -- una
+falla en este registro nunca afecta el ack/nack real (es best-effort).
 
 ## Health checks
 - GET /livez
