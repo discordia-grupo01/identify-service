@@ -54,7 +54,13 @@ const mobileOAuthCallbackHTML = `<!doctype html>
   </body>
 </html>`
 
-// MobileOAuthCallback sirve la pagina de rebote en GET /oauth/mobile-callback.
+// MobileOAuthCallback godoc
+// @Summary      OAuth bounce page for the mobile app (Expo Go)
+// @Description  Serves an HTML page that reads the `state`/`id_token` OAuth fragment and redirects to the app's exp:// (or discordia://) scheme -- Google only accepts https:// redirect URIs, Expo Go only understands exp://.
+// @Tags         oauth
+// @Produce      html
+// @Success      200  {string}  string  "HTML page"
+// @Router       /oauth/mobile-callback [get]
 func MobileOAuthCallback(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(mobileOAuthCallbackHTML))
 }

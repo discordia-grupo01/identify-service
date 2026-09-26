@@ -19,6 +19,17 @@ func NewPinHandler(service service.PinService) *PinHandler {
 	return &PinHandler{service: service}
 }
 
+// Configure godoc
+// @Summary      Set up a device PIN
+// @Description  Lets the caller log back in on this device with a short PIN instead of the full password.
+// @Tags         auth
+// @Accept       json
+// @Security     BearerAuth
+// @Param        body  body  model.ConfigurePinRequest  true  "Device ID and PIN (6-8 digits)"
+// @Success      204  "no content"
+// @Failure      400  {object}  model.ErrorResponse  "missing fields, or PIN not 6-8 digits"
+// @Failure      401  {object}  model.ErrorResponse
+// @Router       /v1/pin [post]
 func (h *PinHandler) Configure(c *gin.Context) {
 	var req model.ConfigurePinRequest
 
@@ -58,6 +69,18 @@ func (h *PinHandler) Configure(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// Login godoc
+// @Summary      Log in with a device PIN
+// @Description  Alternative to email/password for a device that already configured a PIN.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  model.PinLoginRequest  true  "Device ID and PIN"
+// @Success      200  {object}  model.AuthResponse
+// @Failure      400  {object}  model.ErrorResponse
+// @Failure      401  {object}  model.ErrorResponse  "PIN not configured, incorrect, or malformed"
+// @Failure      403  {object}  model.ErrorResponse  "email not verified yet"
+// @Router       /v1/pin/login [post]
 func (h *PinHandler) Login(c *gin.Context) {
 	var req model.PinLoginRequest
 

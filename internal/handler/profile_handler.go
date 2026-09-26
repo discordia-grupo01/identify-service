@@ -24,6 +24,15 @@ func NewProfileHandler(profileService service.ProfileService) *ProfileHandler {
 	return &ProfileHandler{service: profileService}
 }
 
+// GetProfile godoc
+// @Summary      Get my own profile
+// @Tags         profile
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  model.UserResponse
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      404  {object}  model.ErrorResponse
+// @Router       /v1/me/profile [get]
 func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
@@ -53,6 +62,18 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
+// GetPublicProfile godoc
+// @Summary      Get another user's public profile
+// @Description  Only the fields listed as public (name, photo, description, status, mutual servers) -- never email or registration date.
+// @Tags         profile
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  string  true  "Target user's ID"
+// @Success      200  {object}  model.PublicUserResponse
+// @Failure      400  {object}  model.ErrorResponse  "invalid user id"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      404  {object}  model.ErrorResponse
+// @Router       /v1/users/{id} [get]
 func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 	viewerUserID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
@@ -91,6 +112,21 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
+// Update godoc
+// @Summary      Edit my own profile
+// @Description  Multipart form, all fields optional -- omitted fields are left unchanged.
+// @Tags         profile
+// @Accept       multipart/form-data
+// @Produce      json
+// @Security     BearerAuth
+// @Param        name         formData  string  false  "New display name"
+// @Param        description  formData  string  false  "New description"
+// @Param        image        formData  file    false  "New profile image"
+// @Success      200  {object}  model.UserResponse
+// @Failure      400  {object}  model.ErrorResponse  "invalid name/description/image"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      404  {object}  model.ErrorResponse
+// @Router       /v1/me/profile [patch]
 func (h *ProfileHandler) Update(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
@@ -164,6 +200,19 @@ func writeProfileInputError(c *gin.Context, err error) {
 	}})
 }
 
+// UpdateStatus godoc
+// @Summary      Set my custom status
+// @Description  A nil field means "don't touch it"; an empty string means "clear it".
+// @Tags         profile
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  model.StatusUpdateRequest  true  "Status text and/or emoji"
+// @Success      200  {object}  model.UserResponse
+// @Failure      400  {object}  model.ErrorResponse  "invalid text/emoji, or no changes"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      404  {object}  model.ErrorResponse
+// @Router       /v1/me/status [put]
 func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
@@ -202,6 +251,14 @@ func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// DeleteStatus godoc
+// @Summary      Clear my custom status
+// @Tags         profile
+// @Security     BearerAuth
+// @Success      204  "no content"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      404  {object}  model.ErrorResponse
+// @Router       /v1/me/status [delete]
 func (h *ProfileHandler) DeleteStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {

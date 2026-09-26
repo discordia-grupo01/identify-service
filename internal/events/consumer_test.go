@@ -6,21 +6,24 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/discordia-grupo01/events-contract/envelope"
+	"github.com/discordia-grupo01/events-contract/membership"
 )
 
 type membershipHandlerStub struct {
-	joinedCalls []EventPayload
-	leftCalls   []EventPayload
+	joinedCalls []membership.MemberJoined
+	leftCalls   []membership.MemberLeft
 	joinedErr   error
 	leftErr     error
 }
 
-func (s *membershipHandlerStub) HandleMemberJoined(_ context.Context, payload EventPayload) error {
+func (s *membershipHandlerStub) HandleMemberJoined(_ context.Context, payload membership.MemberJoined) error {
 	s.joinedCalls = append(s.joinedCalls, payload)
 	return s.joinedErr
 }
 
-func (s *membershipHandlerStub) HandleMemberLeft(_ context.Context, payload EventPayload) error {
+func (s *membershipHandlerStub) HandleMemberLeft(_ context.Context, payload membership.MemberLeft) error {
 	s.leftCalls = append(s.leftCalls, payload)
 	return s.leftErr
 }
@@ -28,7 +31,7 @@ func (s *membershipHandlerStub) HandleMemberLeft(_ context.Context, payload Even
 func TestShouldRequeueDiscardsUnknownRoutingKey(t *testing.T) {
 	handler := &membershipHandlerStub{}
 
-	requeue := shouldRequeue(context.Background(), handler, "servers.server_deleted", []byte(`{}`))
+	requeue := shouldRequeue(context.Background(), handler, nil, "servers.server_deleted", []byte(`{}`))
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -41,7 +44,7 @@ func TestShouldRequeueDiscardsUnknownRoutingKey(t *testing.T) {
 func TestShouldRequeueDiscardsMalformedPayload(t *testing.T) {
 	handler := &membershipHandlerStub{}
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberJoined, []byte(`not-json`))
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, []byte(`not-json`))
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -53,14 +56,16 @@ func TestShouldRequeueDiscardsMalformedPayload(t *testing.T) {
 
 func TestShouldRequeueDiscardsInvalidServerID(t *testing.T) {
 	handler := &membershipHandlerStub{}
-	body, err := json.Marshal(EventPayload{
-		EventID: "11111111-1111-1111-1111-111111111111", ServerID: "not-a-uuid", UserID: "user-id", OccurredAt: time.Now().UTC(),
+	body, err := json.Marshal(membership.MemberJoined{
+		Meta:     envelope.Meta{EventID: "11111111-1111-1111-1111-111111111111", OccurredAt: time.Now().UTC()},
+		ServerID: "not-a-uuid",
+		UserID:   "user-id",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento: un server_id inválido es un error permanente, no transitorio)")
@@ -72,14 +77,16 @@ func TestShouldRequeueDiscardsInvalidServerID(t *testing.T) {
 
 func TestShouldRequeueDiscardsEmptyUserID(t *testing.T) {
 	handler := &membershipHandlerStub{}
-	body, err := json.Marshal(EventPayload{
-		EventID: "11111111-1111-1111-1111-111111111111", ServerID: "22222222-2222-2222-2222-222222222222", UserID: "", OccurredAt: time.Now().UTC(),
+	body, err := json.Marshal(membership.MemberJoined{
+		Meta:     envelope.Meta{EventID: "11111111-1111-1111-1111-111111111111", OccurredAt: time.Now().UTC()},
+		ServerID: "22222222-2222-2222-2222-222222222222",
+		UserID:   "",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberLeft, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberLeft, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false (ack sin reintento)")
@@ -93,7 +100,7 @@ func TestShouldRequeueOnTransientHandlerFailure(t *testing.T) {
 	handler := &membershipHandlerStub{joinedErr: errors.New("database unavailable")}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if !requeue {
 		t.Fatalf("shouldRequeue() = false, want true (nack + requeue ante fallo transitorio)")
@@ -107,7 +114,7 @@ func TestShouldRequeueDispatchesMemberJoined(t *testing.T) {
 	handler := &membershipHandlerStub{}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberJoined, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberJoined, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false")
@@ -121,7 +128,7 @@ func TestShouldRequeueDispatchesMemberLeft(t *testing.T) {
 	handler := &membershipHandlerStub{}
 	body := validPayloadJSON(t)
 
-	requeue := shouldRequeue(context.Background(), handler, RoutingKeyMemberLeft, body)
+	requeue := shouldRequeue(context.Background(), handler, nil, membership.RoutingKeyMemberLeft, body)
 
 	if requeue {
 		t.Fatalf("shouldRequeue() = true, want false")
@@ -131,13 +138,14 @@ func TestShouldRequeueDispatchesMemberLeft(t *testing.T) {
 	}
 }
 
+// membership.MemberJoined and MemberLeft share the same wire shape, so this
+// body is valid for either routing key regardless of which type marshals it.
 func validPayloadJSON(t *testing.T) []byte {
 	t.Helper()
-	payload := EventPayload{
-		EventID:    "11111111-1111-1111-1111-111111111111",
-		ServerID:   "22222222-2222-2222-2222-222222222222",
-		UserID:     "user-id",
-		OccurredAt: time.Date(2026, time.September, 13, 10, 0, 0, 0, time.UTC),
+	payload := membership.MemberJoined{
+		Meta:     envelope.Meta{EventID: "11111111-1111-1111-1111-111111111111", OccurredAt: time.Date(2026, time.September, 13, 10, 0, 0, 0, time.UTC)},
+		ServerID: "22222222-2222-2222-2222-222222222222",
+		UserID:   "user-id",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
