@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	Period = 30
-	Digits = otp.DigitsSix
-	Skew = 1
+	Period     = 30
+	Digits     = otp.DigitsSix
+	Skew       = 1
 	secretSize = 20
 )
 

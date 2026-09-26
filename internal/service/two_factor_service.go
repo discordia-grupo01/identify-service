@@ -27,7 +27,7 @@ var (
 
 const (
 	TwoFactorChallengeTTL = 5 * time.Minute
-	maxChallengeAttempts = 5
+	maxChallengeAttempts  = 5
 )
 
 var totpCodeFormat = regexp.MustCompile(`^\d{6}$`)
@@ -93,7 +93,6 @@ func (s *twoFactorService) Status(ctx context.Context, userID string) (*model.Tw
 	}
 	return status, nil
 }
-
 
 func (s *twoFactorService) StartSetup(ctx context.Context, userID string) (*model.TwoFactorSetupResponse, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)

@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrOAuthTokenInvalid = errors.New("el token del proveedor externo es invalido")
+	ErrOAuthTokenInvalid        = errors.New("el token del proveedor externo es invalido")
 	ErrOAuthProviderUnavailable = errors.New("el proveedor de identidad externo no esta disponible")
 )
 
