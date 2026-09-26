@@ -16,6 +16,7 @@ import (
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
 	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
+	"github.com/discordia-grupo01/identify-service/internal/utils/twofactor"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -65,7 +66,18 @@ func main() {
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
 	emailConfirmationService := service.NewEmailConfirmationService(emailConfirmationRepo, userRepo, emailService, getEnv("EMAIL_CONFIRMATION_URL", "http://localhost:3000/confirm-email"))
 	emailConfirmationHandler := handler.NewEmailConfirmationHandler(emailConfirmationService)
-	authService := service.NewAuthService(userRepo, refreshRepo, emailConfirmationService)
+	twoFactorCipher, err := twofactor.NewCipher(getEnv("TWO_FACTOR_ENCRYPTION_KEY", getEnv("JWT_SECRET", "")))
+	if err != nil {
+		log.Fatalf("invalid two factor configuration: %v", err)
+	}
+	twoFactorRepo := repository.NewTwoFactorRepository(dbConnection)
+	twoFactorService := service.NewTwoFactorService(twoFactorRepo, userRepo, refreshRepo, twoFactorCipher)
+	twoFactorHandler := handler.NewTwoFactorHandler(twoFactorService)
+
+	authService := service.NewAuthService(userRepo, refreshRepo,
+		service.WithEmailConfirmation(emailConfirmationService),
+		service.WithTwoFactor(twoFactorService),
+	)
 	authHandler := handler.NewAuthHandler(authService)
 	profileImageStorage := newProfileImageStorage()
 	membershipRepo := repository.NewServerMembershipRepository(dbConnection)
@@ -119,6 +131,7 @@ func main() {
 	{
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
+		api.POST("/login/2fa", twoFactorHandler.VerifyLogin)
 		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
 		api.POST("/refresh", authHandler.Refresh)
 		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
@@ -133,6 +146,11 @@ func main() {
 		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
 		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
 		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
+		api.GET("/me/2fa", middleware.RequireAuth(), twoFactorHandler.Status)
+		api.POST("/me/2fa/setup", middleware.RequireAuth(), twoFactorHandler.Setup)
+		api.POST("/me/2fa/activate", middleware.RequireAuth(), twoFactorHandler.Activate)
+		api.POST("/me/2fa/disable", middleware.RequireAuth(), twoFactorHandler.Disable)
+		api.POST("/me/2fa/recovery-codes", middleware.RequireAuth(), twoFactorHandler.RegenerateRecoveryCodes)
 	}
 
 	addr := host + ":" + port
