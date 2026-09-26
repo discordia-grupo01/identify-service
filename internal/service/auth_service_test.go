@@ -394,7 +394,7 @@ func TestAuthServiceLoginReturnsUserAndTokens(t *testing.T) {
 	}}
 	refreshRepo := newRefreshTokenRepositoryStub()
 
-	response, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
+	result, err := NewAuthService(repo, refreshRepo).Login(context.Background(), model.LoginRequest{
 		Email:    "ada@example.com",
 		Password: "Secure123",
 	})
@@ -402,7 +402,11 @@ func TestAuthServiceLoginReturnsUserAndTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if response == nil || response.Token == "" || response.RefreshToken == "" {
+	if result == nil || result.Auth == nil {
+		t.Fatalf("Login() without 2FA must return a session: %+v", result)
+	}
+	response := result.Auth
+	if response.Token == "" || response.RefreshToken == "" {
 		t.Fatalf("unexpected login response: %+v", response)
 	}
 	if response.User.ID != "550e8400-e29b-41d4-a716-446655440000" {
@@ -438,14 +442,15 @@ func TestAuthServiceLoginCreatesUniqueExpiringTokens(t *testing.T) {
 	refreshRepo := newRefreshTokenRepositoryStub()
 	authService := NewAuthService(repo, refreshRepo)
 
-	first, err := authService.Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
+	firstResult, err := authService.Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
 	if err != nil {
 		t.Fatalf("first Login() error = %v", err)
 	}
-	second, err := authService.Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
+	secondResult, err := authService.Login(context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123"})
 	if err != nil {
 		t.Fatalf("second Login() error = %v", err)
 	}
+	first, second := firstResult.Auth, secondResult.Auth
 
 	if first.Token == second.Token {
 		t.Fatal("separate logins must create different access tokens")
@@ -614,7 +619,7 @@ func loginTestUser(t *testing.T, refreshRepo *refreshTokenRepositoryStub) (*user
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	return repo, response
+	return repo, response.Auth
 }
 
 func TestAuthServiceRefreshRotatesTokenWithinSameFamily(t *testing.T) {

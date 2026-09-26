@@ -23,6 +23,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/discordia-grupo01/identify-service/internal/utils/email"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
+	"github.com/discordia-grupo01/identify-service/internal/utils/twofactor"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -129,7 +130,22 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		"https://e2e.example.com/confirm-email",
 	)
 
-	authService := service.NewAuthService(userRepo, sessionRepo, confirmationService)
+	twoFactorCipher, err := twofactor.NewCipher("e2e-two-factor-key")
+	if err != nil {
+		t.Fatalf("NewCipher() error = %v", err)
+	}
+	twoFactorService := service.NewTwoFactorService(
+		repository.NewTwoFactorRepository(db),
+		userRepo,
+		sessionRepo,
+		twoFactorCipher,
+	)
+	twoFactorHandler := handler.NewTwoFactorHandler(twoFactorService)
+
+	authService := service.NewAuthService(userRepo, sessionRepo,
+		service.WithEmailConfirmation(confirmationService),
+		service.WithTwoFactor(twoFactorService),
+	)
 	authHandler := handler.NewAuthHandler(authService)
 	confirmationHandler := handler.NewEmailConfirmationHandler(confirmationService)
 
@@ -151,6 +167,12 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
 		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
 		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
+		api.POST("/login/2fa", twoFactorHandler.VerifyLogin)
+		api.GET("/me/2fa", middleware.RequireAuth(), twoFactorHandler.Status)
+		api.POST("/me/2fa/setup", middleware.RequireAuth(), twoFactorHandler.Setup)
+		api.POST("/me/2fa/activate", middleware.RequireAuth(), twoFactorHandler.Activate)
+		api.POST("/me/2fa/disable", middleware.RequireAuth(), twoFactorHandler.Disable)
+		api.POST("/me/2fa/recovery-codes", middleware.RequireAuth(), twoFactorHandler.RegenerateRecoveryCodes)
 	}
 	e2eMailers.Store(router, confirmationMailer)
 

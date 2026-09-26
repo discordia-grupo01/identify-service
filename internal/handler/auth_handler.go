@@ -102,12 +102,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 // Login godoc
 // @Summary      Log in with email and password
-// @Description  Sets the refresh token as an httpOnly cookie; the response body only carries the access token (refresh_token is zeroed out).
+// @Description  Sets the refresh token as an httpOnly cookie; the response body only carries the access token (refresh_token is zeroed out). If the account has two-factor enabled, the credentials alone are not enough: the request is accepted (202) but not completed, no cookie is set, and the login is finished via POST /v1/login/2fa.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
 // @Param        body  body  model.LoginRequest  true  "Email and password"
-// @Success      200  {object}  model.AuthResponse
+// @Success      200  {object}  model.AuthResponse  "no two-factor on this account: session granted"
+// @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse
 // @Failure      401  {object}  model.ErrorResponse  "wrong email/password"
 // @Failure      403  {object}  model.ErrorResponse  "email not verified yet"
@@ -154,9 +155,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	setRefreshCookie(c, res.RefreshToken)
-	res.RefreshToken = ""
-	c.JSON(http.StatusOK, res)
+	if res.Challenge != nil {
+		// 202 y no 200: la contrasena fue aceptada pero el login no esta
+		// completo, asi que el cuerpo no es una sesion sino un desafio.
+		c.JSON(http.StatusAccepted, res.Challenge)
+		return
+	}
+
+	setRefreshCookie(c, res.Auth.RefreshToken)
+	res.Auth.RefreshToken = ""
+	c.JSON(http.StatusOK, res.Auth)
 }
 
 // Logout godoc
