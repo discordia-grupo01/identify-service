@@ -77,8 +77,8 @@ func TestAuthHandlerLoginReturnsTheChallengeWithoutACookie(t *testing.T) {
 
 	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Secure123"}`)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusAccepted)
 	}
 
 	var response model.TwoFactorChallengeResponse
