@@ -29,6 +29,7 @@ make run
 | DATABASE_SSLMODE | disable | `disable` en local; `require` cuando la BDD es Supabase (exige TLS). |
 | DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
+| TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
 | RABBITMQ_URL | - | URL de conexion a RabbitMQ. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
@@ -135,7 +136,13 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
-- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body.
+- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body. **Si la cuenta tiene segundo factor activo, responde 202 (Accepted) en vez de 200**: trae `two_factor_required: true` + `challenge_token` y no setea cookie. El cliente sigue distinguiendo las dos respuestas por el campo `two_factor_required` (no por el código HTTP): el 202 solo existe para que la documentación de la API sea correcta.
+- `POST /v1/login/2fa` - segundo paso del login. Acepta tanto el codigo de 6 digitos de la app autenticadora como uno de los codigos de recuperacion de un solo uso (se distinguen por el formato). El desafio dura 5 minutos, se consume al primer codigo aceptado y se quema a los 5 intentos fallidos. Publico: quien lo llama todavia no tiene sesion.
+- `GET /v1/me/2fa` - estado del segundo factor de la cuenta (activo, pendiente de confirmar, codigos de recuperacion sin usar). Requiere Bearer JWT.
+- `POST /v1/me/2fa/setup` - genera el secreto TOTP y devuelve la URI `otpauth://` para que el cliente dibuje el QR (el backend no devuelve imagenes). No activa nada: el 2FA queda pendiente. Llamarlo dos veces devuelve el mismo secreto pendiente, para no invalidar un QR ya escaneado. Requiere Bearer JWT.
+- `POST /v1/me/2fa/activate` - confirma el QR con un codigo de la app, activa el 2FA y devuelve los codigos de recuperacion. Es la unica respuesta donde los codigos viajan en claro: despues solo queda su hash. Requiere Bearer JWT.
+- `POST /v1/me/2fa/disable` - desactiva el segundo factor reingresando la contraseña, y borra secreto, codigos y desafios pendientes. Requiere Bearer JWT.
+- `POST /v1/me/2fa/recovery-codes` - regenera la lista de codigos de recuperacion (invalida la anterior completa) reingresando la contraseña. Requiere Bearer JWT.
 - `POST /v1/email-confirmation` - solicita o reenvia el email de confirmacion. Responde de forma generica para no revelar si un email esta registrado y aplica un limite de solicitudes.
 - `POST /v1/email-confirmation/confirm` - confirma el email usando el token recibido. El token es de un solo uso y expira segun `EMAIL_CONFIRMATION_EXPIRATION`.
 - `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).

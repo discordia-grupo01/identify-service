@@ -108,8 +108,11 @@ paths:
         - auth
   /v1/login:
     post:
-      description: Sets the refresh token as an httpOnly cookie; the response body
-        only carries the access token (refresh_token is zeroed out).
+      description: "Sets the refresh token as an httpOnly cookie; the response body
+        only carries the access token (refresh_token is zeroed out). If the
+        account has two-factor enabled, the credentials alone are not enough:
+        the request is accepted (202) but not completed, no cookie is set, and
+        the login is finished via POST /v1/login/2fa."
       requestBody:
         content:
           application/json:
@@ -119,11 +122,17 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: "no two-factor on this account: session granted"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/model.AuthResponse"
+        "202":
+          description: "two-factor enabled: accepted, continue at POST /v1/login/2fa"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorChallengeResponse"
         "400":
           description: Bad Request
           content:
@@ -145,6 +154,49 @@ paths:
       summary: Log in with email and password
       tags:
         - auth
+  /v1/login/2fa:
+    post:
+      description: "Second step of the login: takes the challenge_token from /v1/login
+        and either a 6-digit code from the authenticator app or a recovery code
+        -- same endpoint for both. On success, sets the refresh token as an
+        httpOnly cookie and grants a session. The challenge allows up to 5
+        attempts within 5 minutes; either limit exhausted means starting over
+        from /v1/login."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.TwoFactorVerifyRequest"
+        description: Challenge token plus a TOTP or recovery code
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorVerifyResponse"
+        "400":
+          description: missing challenge_token or code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: wrong/expired code, or the challenge itself expired/was already used
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "429":
+          description: too many failed attempts on this challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Complete a login that requires two-factor
+      tags:
+        - two-factor
   /v1/logout:
     post:
       description: Revokes the refresh token (read from the httpOnly cookie) and
@@ -163,6 +215,183 @@ paths:
       summary: Log out
       tags:
         - auth
+  /v1/me/2fa:
+    get:
+      description: Whether 2FA is active, pending confirmation (QR requested but not
+        scanned yet), or off, plus how many recovery codes are left.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorStatusResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get the account's two-factor status
+      tags:
+        - two-factor
+  /v1/me/2fa/activate:
+    post:
+      description: Validates a code from the authenticator app against the pending
+        secret. On success, activates 2FA and returns the one-time recovery
+        codes -- they are shown here only, afterwards only their hash is kept.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.TwoFactorActivateRequest"
+        description: 6-digit code from the authenticator app
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorRecoveryCodesResponse"
+        "400":
+          description: missing code, or the code is wrong/expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: no pending setup, or 2FA is already enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Confirm the QR and activate two-factor authentication
+      tags:
+        - two-factor
+  /v1/me/2fa/disable:
+    post:
+      description: Requires the account password again, so an already-open session (a
+        borrowed laptop, a forgotten tab) can't strip 2FA from the account by
+        itself. Login stops requesting the second factor right away.
+      requestBody:
+        $ref: "#/components/requestBodies/model.TwoFactorPasswordRequest"
+      responses:
+        "204":
+          description: 2FA disabled
+        "400":
+          description: missing password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: wrong password -- not 401, so the front doesn't treat it as an
+            expired session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is not enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Disable two-factor authentication
+      tags:
+        - two-factor
+  /v1/me/2fa/recovery-codes:
+    post:
+      description: "Requires the account password again. Replaces the whole list:
+        every previous recovery code, used or not, stops working. Recommended
+        after using one."
+      requestBody:
+        $ref: "#/components/requestBodies/model.TwoFactorPasswordRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorRecoveryCodesResponse"
+        "400":
+          description: missing password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is not enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Regenerate the recovery code list
+      tags:
+        - two-factor
+  /v1/me/2fa/setup:
+    post:
+      description: Generates a TOTP secret and returns the otpauth:// URI for the
+        front to render as a QR. 2FA stays off until a code is confirmed via
+        /v1/me/2fa/activate. Calling this twice while pending reuses the same
+        secret instead of rotating it.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorSetupResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is already enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Start setting up two-factor authentication
+      tags:
+        - two-factor
   /v1/me/profile:
     get:
       responses:
@@ -567,6 +796,14 @@ paths:
 servers:
   - url: /
 components:
+  requestBodies:
+    model.TwoFactorPasswordRequest:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/model.TwoFactorPasswordRequest"
+      description: Account password
+      required: true
   securitySchemes:
     BearerAuth:
       description: Type "Bearer" followed by a space and the JWT.
@@ -707,6 +944,79 @@ components:
           type: string
         status_text:
           type: string
+      type: object
+    model.TwoFactorActivateRequest:
+      properties:
+        code:
+          type: string
+      required:
+        - code
+      type: object
+    model.TwoFactorChallengeResponse:
+      properties:
+        challenge_token:
+          type: string
+        expires_in:
+          type: integer
+        two_factor_required:
+          type: boolean
+      type: object
+    model.TwoFactorPasswordRequest:
+      properties:
+        password:
+          type: string
+      required:
+        - password
+      type: object
+    model.TwoFactorRecoveryCodesResponse:
+      properties:
+        recovery_codes:
+          items:
+            type: string
+          type: array
+      type: object
+    model.TwoFactorSetupResponse:
+      properties:
+        account:
+          type: string
+        issuer:
+          type: string
+        otpauth_url:
+          type: string
+        secret:
+          type: string
+      type: object
+    model.TwoFactorStatusResponse:
+      properties:
+        enabled:
+          type: boolean
+        pending_activation:
+          type: boolean
+        recovery_codes_remaining:
+          type: integer
+      type: object
+    model.TwoFactorVerifyRequest:
+      properties:
+        challenge_token:
+          type: string
+        code:
+          type: string
+      required:
+        - challenge_token
+        - code
+      type: object
+    model.TwoFactorVerifyResponse:
+      properties:
+        recovery_code_used:
+          type: boolean
+        recovery_codes_remaining:
+          type: integer
+        refresh_token:
+          type: string
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/model.UserResponse"
       type: object
     model.UserResponse:
       properties:

@@ -17,6 +17,7 @@ import (
 
 type authServiceStub struct {
 	response      *model.AuthResponse
+	challenge     *model.TwoFactorChallengeResponse
 	registerUser  *model.UserResponse
 	err           error
 	request       model.RegisterRequest
@@ -36,10 +37,16 @@ func (s *authServiceStub) Register(_ context.Context, request model.RegisterRequ
 	return s.registerUser, s.err
 }
 
-func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (*model.AuthResponse, error) {
+func (s *authServiceStub) Login(_ context.Context, request model.LoginRequest) (*model.LoginResult, error) {
 	s.called = true
 	s.loginRequest = request
-	return s.response, s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.challenge != nil {
+		return &model.LoginResult{Challenge: s.challenge}, nil
+	}
+	return &model.LoginResult{Auth: s.response}, nil
 }
 
 func (s *authServiceStub) Refresh(_ context.Context, refreshToken string) (*model.AuthResponse, error) {
