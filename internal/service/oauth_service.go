@@ -12,26 +12,17 @@ import (
 )
 
 var (
-	// ErrOAuthTokenInvalid: Google respondio pero el ID token es invalido
-	// (firma, audiencia, expiracion o email sin verificar).
 	ErrOAuthTokenInvalid = errors.New("el token del proveedor externo es invalido")
-	// ErrOAuthProviderUnavailable: no se pudo contactar a Google (red caida,
-	// timeout). El cliente debe ofrecer el login con email y contrasena.
 	ErrOAuthProviderUnavailable = errors.New("el proveedor de identidad externo no esta disponible")
 )
 
 const googleProvider = "google"
 
-// GoogleTokenVerifier permite reemplazar el verificador real por un stub en
-// los tests unitarios, sin depender de red hacia Google.
 type GoogleTokenVerifier interface {
 	Verify(ctx context.Context, rawIDToken string) (*googleoauth.Claims, error)
 }
 
 type OAuthService interface {
-	// LoginWithGoogle valida el ID token, vincula la identidad a una cuenta
-	// existente por email (CA2) o crea una cuenta nueva (CA1), y devuelve la
-	// misma respuesta de sesion que el login por contrasena.
 	LoginWithGoogle(ctx context.Context, idToken string) (*model.AuthResponse, error)
 }
 
@@ -94,8 +85,6 @@ func (s *oauthService) findOrCreateUser(ctx context.Context, claims *googleoauth
 		return nil, err
 	}
 	if user == nil {
-		// CA1: no existe cuenta con ese email, se crea una nueva asociada al
-		// proveedor externo. Sin password: solo puede iniciar sesion via OAuth.
 		user = &model.User{
 			ID:            uuid.NewString(),
 			Name:          claims.Name,
@@ -108,7 +97,6 @@ func (s *oauthService) findOrCreateUser(ctx context.Context, claims *googleoauth
 		}
 	}
 
-	// CA2 (o recien creado en CA1): vincula la identidad federada a la cuenta.
 	if err := s.identityRepo.Create(ctx, &model.OAuthIdentity{
 		ID:              uuid.NewString(),
 		UserID:          user.ID,

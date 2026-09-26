@@ -41,7 +41,17 @@ paths:
   /v1/login:
     post:
       summary: Iniciar sesión
-      description: Autentica con email y contraseña. Devuelve un access token de corta duración en el body y establece el refresh token como cookie httpOnly (no viaja en el body).
+      description: >-
+        Autentica con email y contraseña. Devuelve un access token de corta
+        duración en el body y establece el refresh token como cookie httpOnly
+        (no viaja en el body).
+
+
+        Si la cuenta tiene segundo factor activo, el 200 NO trae sesión: trae
+        un desafío (`two_factor_required: true` + `challenge_token`) y no
+        establece la cookie. El login se completa en `POST /v1/login/2fa`.
+        El cliente distingue las dos respuestas por el campo
+        `two_factor_required`.
       requestBody:
         required: true
         content:
@@ -50,17 +60,149 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
       responses:
         "200":
-          description: Login exitoso
+          description: Login exitoso, o desafío de segundo factor pendiente
           headers:
             Set-Cookie:
               $ref: '#/components/headers/SetRefreshTokenCookie'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AuthResponse'
+                  - $ref: '#/components/schemas/TwoFactorChallengeResponse'
         "400": { description: Datos de entrada inválidos }
         "401": { description: Credenciales inválidas }
         "403": { description: El email todavía no fue verificado (código EMAIL_NOT_VERIFIED) }
+        "500": { description: Error interno }
+  /v1/login/2fa:
+    post:
+      summary: Completar el login con el segundo factor
+      description: >-
+        Segundo paso del login. Acepta tanto el código de 6 dígitos de la app
+        autenticadora como uno de los códigos de recuperación de un solo uso:
+        se distinguen por su formato, el usuario usa el mismo campo.
+
+
+        El desafío dura 5 minutos, se consume al primer código aceptado y se
+        quema a los 5 intentos fallidos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorVerifyRequest'
+      responses:
+        "200":
+          description: Login completado
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshTokenCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorVerifyResponse'
+        "400": { description: Datos de entrada inválidos }
+        "401":
+          description: >-
+            Código incorrecto o expirado (INVALID_TWO_FACTOR_CODE), o desafío
+            vencido/ya usado (TWO_FACTOR_CHALLENGE_EXPIRED). No se otorga sesión.
+        "429": { description: Demasiados intentos fallidos; el desafío se quema (TWO_FACTOR_TOO_MANY_ATTEMPTS) }
+        "500": { description: Error interno }
+  /v1/me/2fa:
+    get:
+      summary: Estado del segundo factor de la cuenta
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Estado actual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorStatusResponse'
+        "401": { description: Sesión inválida o expirada }
+        "500": { description: Error interno }
+  /v1/me/2fa/setup:
+    post:
+      summary: Generar el secreto y el QR para activar 2FA
+      description: >-
+        Devuelve el secreto y la URI `otpauth://` para que el cliente dibuje el
+        QR. No activa nada: el 2FA queda pendiente hasta que
+        `POST /v1/me/2fa/activate` confirme un código. Llamarlo dos veces
+        devuelve el mismo secreto pendiente, para no invalidar un QR ya
+        escaneado.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Secreto pendiente de confirmación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorSetupResponse'
+        "401": { description: Sesión inválida o expirada }
+        "409": { description: La cuenta ya tiene 2FA activo (TWO_FACTOR_ALREADY_ENABLED) }
+        "500": { description: Error interno }
+  /v1/me/2fa/activate:
+    post:
+      summary: Confirmar el QR y activar 2FA
+      description: Activa el segundo factor y devuelve los códigos de recuperación. Es la única vez que los códigos viajan en claro.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorActivateRequest'
+      responses:
+        "200":
+          description: 2FA activado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorRecoveryCodesResponse'
+        "400": { description: El código no es correcto (INVALID_TWO_FACTOR_CODE) o falta en el body }
+        "401": { description: Sesión inválida o expirada }
+        "409": { description: Falta escanear el QR (TWO_FACTOR_SETUP_MISSING) o ya estaba activo (TWO_FACTOR_ALREADY_ENABLED) }
+        "500": { description: Error interno }
+  /v1/me/2fa/disable:
+    post:
+      summary: Desactivar 2FA
+      description: Requiere reingresar la contraseña. Borra el secreto, los códigos de recuperación y los desafíos pendientes.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorPasswordRequest'
+      responses:
+        "204": { description: 2FA desactivado }
+        "400": { description: Falta la contraseña en el body }
+        "401": { description: Sesión inválida o expirada }
+        "403": { description: La contraseña es incorrecta (INVALID_PASSWORD) }
+        "409": { description: La cuenta no tiene 2FA activo (TWO_FACTOR_NOT_ENABLED) }
+        "500": { description: Error interno }
+  /v1/me/2fa/recovery-codes:
+    post:
+      summary: Regenerar los códigos de recuperación
+      description: Invalida la lista anterior completa y devuelve una nueva. Requiere reingresar la contraseña.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorPasswordRequest'
+      responses:
+        "200":
+          description: Lista nueva
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorRecoveryCodesResponse'
+        "400": { description: Falta la contraseña en el body }
+        "401": { description: Sesión inválida o expirada }
+        "403": { description: La contraseña es incorrecta (INVALID_PASSWORD) }
+        "409": { description: La cuenta no tiene 2FA activo (TWO_FACTOR_NOT_ENABLED) }
         "500": { description: Error interno }
   /v1/oauth/google:
     post:
@@ -417,6 +559,102 @@ components:
       properties:
         email: { type: string, format: email }
         password: { type: string, format: password }
+    TwoFactorActivateRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          description: Código de 6 dígitos que muestra la app autenticadora en este momento.
+    TwoFactorVerifyRequest:
+      type: object
+      required: [challenge_token, code]
+      properties:
+        challenge_token:
+          type: string
+          description: El token devuelto por POST /v1/login cuando la cuenta tiene 2FA activo.
+        code:
+          type: string
+          description: >-
+            Código de 6 dígitos de la app autenticadora, o un código de
+            recuperación de un solo uso (10 caracteres alfanuméricos, con o sin
+            guión; se normaliza mayúsculas/minúsculas y separadores).
+    TwoFactorPasswordRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
+          description: La contraseña actual de la cuenta, reingresada para confirmar la operación.
+    TwoFactorChallengeResponse:
+      type: object
+      description: Respuesta de POST /v1/login cuando la cuenta tiene 2FA activo. No hay sesión todavía.
+      required: [two_factor_required, challenge_token, expires_in]
+      properties:
+        two_factor_required:
+          type: boolean
+          enum: [true]
+        challenge_token:
+          type: string
+          description: Identifica el login en curso. No es una credencial; no sirve para ningún endpoint autenticado.
+        expires_in:
+          type: integer
+          description: Segundos de validez del desafío.
+          example: 300
+    TwoFactorVerifyResponse:
+      allOf:
+        - $ref: '#/components/schemas/AuthResponse'
+        - type: object
+          properties:
+            recovery_code_used:
+              type: boolean
+              description: true si se entró con un código de recuperación. El cliente usa esto para recomendar regenerar la lista.
+            recovery_codes_remaining:
+              type: integer
+              description: Códigos de recuperación sin usar que quedan. Sólo viene cuando recovery_code_used es true.
+    TwoFactorSetupResponse:
+      type: object
+      required: [secret, otpauth_url, issuer, account]
+      properties:
+        secret:
+          type: string
+          description: >-
+            Secreto TOTP: 20 bytes aleatorios (160 bits, lo que recomienda
+            RFC 4226 para HMAC-SHA1) codificados en base32 sin padding, lo que
+            da siempre 32 caracteres del alfabeto A-Z y 2-7. Se expone para el
+            caso "no puedo escanear el QR, lo ingreso a mano".
+          example: 2OJFAWEWK6QNRBYVQAHFJFCJXDGXGH2V
+        otpauth_url:
+          type: string
+          description: URI otpauth:// completa. El cliente la codifica como QR; el backend no devuelve imágenes.
+          example: otpauth://totp/Discordia:ada@example.com?algorithm=SHA1&digits=6&issuer=Discordia&period=30&secret=2OJFAWEWK6QNRBYVQAHFJFCJXDGXGH2V
+        issuer:
+          type: string
+        account:
+          type: string
+    TwoFactorStatusResponse:
+      type: object
+      required: [enabled, pending_activation, recovery_codes_remaining]
+      properties:
+        enabled:
+          type: boolean
+        pending_activation:
+          type: boolean
+          description: Hay un secreto generado pero todavía sin confirmar. El login sigue siendo de un solo paso.
+        recovery_codes_remaining:
+          type: integer
+    TwoFactorRecoveryCodesResponse:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          description: Códigos de un solo uso. Sólo se muestran en esta respuesta; después el servidor únicamente guarda su hash.
+          items:
+            type: string
+            example: A1B2C-D3E4F
     GoogleLoginRequest:
       type: object
       required: [id_token]
