@@ -62,7 +62,6 @@ func TestTwoFactorFullLifecycle(t *testing.T) {
 		t.Fatal("login with 2FA active must return a challenge")
 	}
 
-
 	wrongBody, _ := json.Marshal(model.TwoFactorVerifyRequest{ChallengeToken: challengeToken, Code: "000000"})
 	wrongRecorder := doRequest(router, http.MethodPost, "/v1/login/2fa", wrongBody, "")
 	if wrongRecorder.Code != http.StatusUnauthorized {

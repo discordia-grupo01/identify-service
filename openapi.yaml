@@ -1,787 +1,1041 @@
-openapi: 3.0.3
+openapi: 3.0.0
 info:
-  title: Discordia - SERVICIO
-  version: "1.0.0"
+  contact: {}
+  description: >-
+    Identity/auth service: registration, login (password, Google OAuth, device
+    PIN), sessions, password recovery, email confirmation, profile.
+
+    Routes under /v1/me and /v1/users require identity: the JWT is validated by Kong at the gateway (or by this service's own middleware.RequireAuth when hit directly).
+  title: Discordia - Identity
+  version: 1.0.0
 paths:
-  /v1/users:
-    post:
-      summary: Registrar un usuario
-      description: Crea una cuenta nueva. Para autenticarse se debe usar el endpoint de login.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegisterRequest'
-      responses:
-        "201":
-          description: Usuario registrado correctamente
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        "400":
-          description: Datos inválidos o contraseña insegura
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: El correo electrónico ya está registrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Error interno
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /v1/login:
-    post:
-      summary: Iniciar sesión
-      description: >-
-        Autentica con email y contraseña. Devuelve un access token de corta
-        duración en el body y establece el refresh token como cookie httpOnly
-        (no viaja en el body).
-
-
-        Si la cuenta tiene segundo factor activo, el 200 NO trae sesión: trae
-        un desafío (`two_factor_required: true` + `challenge_token`) y no
-        establece la cookie. El login se completa en `POST /v1/login/2fa`.
-        El cliente distingue las dos respuestas por el campo
-        `two_factor_required`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
-      responses:
-        "200":
-          description: Login exitoso, o desafío de segundo factor pendiente
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetRefreshTokenCookie'
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/AuthResponse'
-                  - $ref: '#/components/schemas/TwoFactorChallengeResponse'
-        "400": { description: Datos de entrada inválidos }
-        "401": { description: Credenciales inválidas }
-        "403": { description: El email todavía no fue verificado (código EMAIL_NOT_VERIFIED) }
-        "500": { description: Error interno }
-  /v1/login/2fa:
-    post:
-      summary: Completar el login con el segundo factor
-      description: >-
-        Segundo paso del login. Acepta tanto el código de 6 dígitos de la app
-        autenticadora como uno de los códigos de recuperación de un solo uso:
-        se distinguen por su formato, el usuario usa el mismo campo.
-
-
-        El desafío dura 5 minutos, se consume al primer código aceptado y se
-        quema a los 5 intentos fallidos.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TwoFactorVerifyRequest'
-      responses:
-        "200":
-          description: Login completado
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetRefreshTokenCookie'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TwoFactorVerifyResponse'
-        "400": { description: Datos de entrada inválidos }
-        "401":
-          description: >-
-            Código incorrecto o expirado (INVALID_TWO_FACTOR_CODE), o desafío
-            vencido/ya usado (TWO_FACTOR_CHALLENGE_EXPIRED). No se otorga sesión.
-        "429": { description: Demasiados intentos fallidos; el desafío se quema (TWO_FACTOR_TOO_MANY_ATTEMPTS) }
-        "500": { description: Error interno }
-  /v1/me/2fa:
+  /livez:
     get:
-      summary: Estado del segundo factor de la cuenta
-      security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: Estado actual
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TwoFactorStatusResponse'
-        "401": { description: Sesión inválida o expirada }
-        "500": { description: Error interno }
-  /v1/me/2fa/setup:
-    post:
-      summary: Generar el secreto y el QR para activar 2FA
-      description: >-
-        Devuelve el secreto y la URI `otpauth://` para que el cliente dibuje el
-        QR. No activa nada: el 2FA queda pendiente hasta que
-        `POST /v1/me/2fa/activate` confirme un código. Llamarlo dos veces
-        devuelve el mismo secreto pendiente, para no invalidar un QR ya
-        escaneado.
-      security: [{ bearerAuth: [] }]
+          description: ok
+      summary: Liveness check
+      tags:
+        - ops
+  /oauth/mobile-callback:
+    get:
+      description: Serves an HTML page that reads the `state`/`id_token` OAuth
+        fragment and redirects to the app's exp:// (or discordia://) scheme --
+        Google only accepts https:// redirect URIs, Expo Go only understands
+        exp://.
       responses:
         "200":
-          description: Secreto pendiente de confirmación
+          description: HTML page
           content:
-            application/json:
+            text/html:
               schema:
-                $ref: '#/components/schemas/TwoFactorSetupResponse'
-        "401": { description: Sesión inválida o expirada }
-        "409": { description: La cuenta ya tiene 2FA activo (TWO_FACTOR_ALREADY_ENABLED) }
-        "500": { description: Error interno }
-  /v1/me/2fa/activate:
-    post:
-      summary: Confirmar el QR y activar 2FA
-      description: Activa el segundo factor y devuelve los códigos de recuperación. Es la única vez que los códigos viajan en claro.
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TwoFactorActivateRequest'
+                type: string
+      summary: OAuth bounce page for the mobile app (Expo Go)
+      tags:
+        - oauth
+  /readyz:
+    get:
+      description: Also pings the database.
       responses:
         "200":
-          description: 2FA activado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TwoFactorRecoveryCodesResponse'
-        "400": { description: El código no es correcto (INVALID_TWO_FACTOR_CODE) o falta en el body }
-        "401": { description: Sesión inválida o expirada }
-        "409": { description: Falta escanear el QR (TWO_FACTOR_SETUP_MISSING) o ya estaba activo (TWO_FACTOR_ALREADY_ENABLED) }
-        "500": { description: Error interno }
-  /v1/me/2fa/disable:
-    post:
-      summary: Desactivar 2FA
-      description: Requiere reingresar la contraseña. Borra el secreto, los códigos de recuperación y los desafíos pendientes.
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TwoFactorPasswordRequest'
-      responses:
-        "204": { description: 2FA desactivado }
-        "400": { description: Falta la contraseña en el body }
-        "401": { description: Sesión inválida o expirada }
-        "403": { description: La contraseña es incorrecta (INVALID_PASSWORD) }
-        "409": { description: La cuenta no tiene 2FA activo (TWO_FACTOR_NOT_ENABLED) }
-        "500": { description: Error interno }
-  /v1/me/2fa/recovery-codes:
-    post:
-      summary: Regenerar los códigos de recuperación
-      description: Invalida la lista anterior completa y devuelve una nueva. Requiere reingresar la contraseña.
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TwoFactorPasswordRequest'
-      responses:
-        "200":
-          description: Lista nueva
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TwoFactorRecoveryCodesResponse'
-        "400": { description: Falta la contraseña en el body }
-        "401": { description: Sesión inválida o expirada }
-        "403": { description: La contraseña es incorrecta (INVALID_PASSWORD) }
-        "409": { description: La cuenta no tiene 2FA activo (TWO_FACTOR_NOT_ENABLED) }
-        "500": { description: Error interno }
-  /v1/oauth/google:
-    post:
-      summary: Login con proveedor federado (Google)
-      description: >-
-        Valida el ID token emitido por Google (obtenido en el cliente vía
-        Google Identity Services / expo-auth-session) y autentica al
-        usuario: si ya existe una identidad vinculada, inicia sesión con esa
-        cuenta; si no, busca una cuenta con el mismo email para vincularla, o
-        crea una cuenta nueva. Devuelve la misma forma de respuesta que
-        /v1/login (access token en el body, refresh token como cookie
-        httpOnly).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GoogleLoginRequest'
-      responses:
-        "200":
-          description: Login exitoso (cuenta nueva o vinculada a una existente)
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetRefreshTokenCookie'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        "400": { description: Falta el id_token }
-        "401": { description: El id_token es inválido, expiró, o el email no está verificado }
-        "503": { description: No se pudo contactar al proveedor externo (Google); el cliente debe ofrecer login con email y contraseña }
-        "500": { description: Error interno }
-  /v1/refresh:
-    post:
-      summary: Renovar la sesión
-      description: Rota el refresh token (enviado automáticamente como cookie httpOnly) y emite un access token nuevo junto con un refresh token nuevo. Si el refresh token ya había sido rotado y se reutiliza, se asume robo y se revoca toda la sesión.
-      parameters:
-        - $ref: '#/components/parameters/RefreshTokenCookie'
-      responses:
-        "200":
-          description: Sesión renovada
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetRefreshTokenCookie'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        "401": { description: Refresh token ausente, inválido, expirado o reutilizado tras haber sido rotado }
-        "500": { description: Error interno }
-  /v1/logout:
-    post:
-      summary: Cerrar sesión
-      description: Revoca el refresh token de la sesión actual (enviado automáticamente como cookie httpOnly) y limpia la cookie. El access token vigente en ese momento sigue siendo válido hasta su expiración natural, pero ya no puede renovarse.
-      parameters:
-        - $ref: '#/components/parameters/RefreshTokenCookie'
-      responses:
-        "204": { description: Sesión invalidada }
-        "401": { description: Refresh token ausente, expirado o ya revocado }
-        "500": { description: Error interno }
-  /v1/pin:
-    post:
-      summary: Activar el PIN de acceso rápido en este dispositivo
-      description: >-
-        Activa (o reemplaza, si ya existía uno) el PIN numérico de 6 a 8
-        dígitos para este dispositivo (historia "Registro con PIN"). Requiere sesión
-        activa: el usuario se toma del access token, no del body. El PIN se
-        guarda hasheado con bcrypt, nunca en texto plano.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ConfigurePinRequest'
-      responses:
-        "204": { description: PIN activado correctamente }
-        "400":
-          description: Falta el pin o el device_id, o el PIN no tiene el formato esperado (6 a 8 dígitos numéricos)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401": { description: Sesión inválida o expirada }
-        "500":
-          description: Error interno
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /v1/pin/login:
-    post:
-      summary: Iniciar sesión rápida con PIN
-      description: >-
-        Autentica únicamente con el PIN y el device_id, sin pedir email
-        (historia "Registro con PIN"). Solo funciona en un dispositivo que ya
-        tiene un PIN configurado (ver POST /v1/pin): en cualquier otro
-        dispositivo no hay PIN asociado y este endpoint siempre falla.
-        Devuelve la misma forma de respuesta que /v1/login (access token en
-        el body, refresh token como cookie httpOnly).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PinLoginRequest'
-      responses:
-        "200":
-          description: Login exitoso
-          headers:
-            Set-Cookie:
-              $ref: '#/components/headers/SetRefreshTokenCookie'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        "400": { description: Falta el pin o el device_id }
-        "401": { description: El PIN es incorrecto, o este dispositivo no tiene un PIN configurado }
-        "403": { description: El email de la cuenta todavía no fue verificado (código EMAIL_NOT_VERIFIED) }
-        "500": { description: Error interno }
-  /v1/password-recovery:
-    post:
-      summary: Solicitar recuperación de contraseña
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PasswordRecoveryRequest'
-      responses:
-        "202": { description: Respuesta genérica, exista o no el correo }
-        "400": { description: Datos de entrada inválidos }
-        "429": { description: Límite de solicitudes excedido }
-        "500": { description: Error interno }
-  /v1/password-reset:
-    post:
-      summary: Definir una nueva contraseña
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
-      responses:
-        "200": { description: Contraseña actualizada y enlace invalidado }
-        "400": { description: Contraseña inválida o enlace expirado/usado }
-        "500": { description: Error interno }
+          description: ready
+        "503":
+          description: database unavailable
+      summary: Readiness check
+      tags:
+        - ops
   /v1/email-confirmation:
     post:
-      summary: Solicitar o reenviar confirmación de correo
+      description: Always responds 202 regardless of whether the email is registered
+        or already confirmed. Rate-limited per email.
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmailConfirmationRequest'
+              $ref: "#/components/schemas/model.EmailConfirmationRequest"
+        description: Email
+        required: true
       responses:
-        "202": { description: Respuesta genérica, exista o no el correo }
-        "400": { description: Datos de entrada inválidos }
-        "429": { description: Límite de solicitudes excedido }
-        "500": { description: Error interno }
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "429":
+          description: too many requests for this email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Request an email confirmation link
+      tags:
+        - auth
   /v1/email-confirmation/confirm:
     post:
-      summary: Confirmar el correo electrónico de una cuenta
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EmailConfirmationTokenRequest'
-      responses:
-        "200": { description: Correo confirmado correctamente }
-        "400": { description: Token inválido, expirado o ya utilizado }
-        "500": { description: Error interno }
-  /v1/me/profile:
-    get:
-      summary: Obtener el perfil del usuario autenticado
-      description: Devuelve la información del perfil correspondiente al token Bearer provisto.
-      security:
-        - bearerAuth: []
+              $ref: "#/components/schemas/model.EmailConfirmationTokenRequest"
+        description: Confirmation token
+        required: true
       responses:
         "200":
-          description: Perfil obtenido correctamente
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserResponse'
-        "401":
-          description: Sesión inválida o expirada
+                additionalProperties:
+                  type: string
+                type: object
+        "400":
+          description: invalid, expired, or already used token
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Usuario inexistente
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Error interno
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    patch:
-      summary: Editar el perfil del usuario autenticado
-      security:
-        - bearerAuth: []
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Confirm an email address using its token
+      tags:
+        - auth
+  /v1/login:
+    post:
+      description: "Sets the refresh token as an httpOnly cookie; the response body
+        only carries the access token (refresh_token is zeroed out). If the
+        account has two-factor enabled, the credentials alone are not enough:
+        the request is accepted (202) but not completed, no cookie is set, and
+        the login is finished via POST /v1/login/2fa."
       requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.LoginRequest"
+        description: Email and password
         required: true
+      responses:
+        "200":
+          description: "no two-factor on this account: session granted"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.AuthResponse"
+        "202":
+          description: "two-factor enabled: accepted, continue at POST /v1/login/2fa"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorChallengeResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: wrong email/password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: email not verified yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Log in with email and password
+      tags:
+        - auth
+  /v1/login/2fa:
+    post:
+      description: "Second step of the login: takes the challenge_token from /v1/login
+        and either a 6-digit code from the authenticator app or a recovery code
+        -- same endpoint for both. On success, sets the refresh token as an
+        httpOnly cookie and grants a session. The challenge allows up to 5
+        attempts within 5 minutes; either limit exhausted means starting over
+        from /v1/login."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.TwoFactorVerifyRequest"
+        description: Challenge token plus a TOTP or recovery code
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorVerifyResponse"
+        "400":
+          description: missing challenge_token or code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: wrong/expired code, or the challenge itself expired/was already used
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "429":
+          description: too many failed attempts on this challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Complete a login that requires two-factor
+      tags:
+        - two-factor
+  /v1/logout:
+    post:
+      description: Revokes the refresh token (read from the httpOnly cookie) and
+        clears the cookie.
+      responses:
+        "204":
+          description: no content
+        "401":
+          description: missing/invalid session cookie, or session expired
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Log out
+      tags:
+        - auth
+  /v1/me/2fa:
+    get:
+      description: Whether 2FA is active, pending confirmation (QR requested but not
+        scanned yet), or off, plus how many recovery codes are left.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorStatusResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get the account's two-factor status
+      tags:
+        - two-factor
+  /v1/me/2fa/activate:
+    post:
+      description: Validates a code from the authenticator app against the pending
+        secret. On success, activates 2FA and returns the one-time recovery
+        codes -- they are shown here only, afterwards only their hash is kept.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.TwoFactorActivateRequest"
+        description: 6-digit code from the authenticator app
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorRecoveryCodesResponse"
+        "400":
+          description: missing code, or the code is wrong/expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: no pending setup, or 2FA is already enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Confirm the QR and activate two-factor authentication
+      tags:
+        - two-factor
+  /v1/me/2fa/disable:
+    post:
+      description: Requires the account password again, so an already-open session (a
+        borrowed laptop, a forgotten tab) can't strip 2FA from the account by
+        itself. Login stops requesting the second factor right away.
+      requestBody:
+        $ref: "#/components/requestBodies/model.TwoFactorPasswordRequest"
+      responses:
+        "204":
+          description: 2FA disabled
+        "400":
+          description: missing password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: wrong password -- not 401, so the front doesn't treat it as an
+            expired session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is not enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Disable two-factor authentication
+      tags:
+        - two-factor
+  /v1/me/2fa/recovery-codes:
+    post:
+      description: "Requires the account password again. Replaces the whole list:
+        every previous recovery code, used or not, stops working. Recommended
+        after using one."
+      requestBody:
+        $ref: "#/components/requestBodies/model.TwoFactorPasswordRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorRecoveryCodesResponse"
+        "400":
+          description: missing password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: wrong password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is not enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Regenerate the recovery code list
+      tags:
+        - two-factor
+  /v1/me/2fa/setup:
+    post:
+      description: Generates a TOTP secret and returns the otpauth:// URI for the
+        front to render as a QR. 2FA stays off until a code is confirmed via
+        /v1/me/2fa/activate. Calling this twice while pending reuses the same
+        secret instead of rotating it.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorSetupResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: 2FA is already enabled on this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Start setting up two-factor authentication
+      tags:
+        - two-factor
+  /v1/me/profile:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.UserResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get my own profile
+      tags:
+        - profile
+    patch:
+      description: Multipart form, all fields optional -- omitted fields are left unchanged.
+      requestBody:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ProfileUpdateRequest'
+              type: object
+              properties:
+                name:
+                  description: New display name
+                  type: string
+                description:
+                  description: New description
+                  type: string
+                image:
+                  description: New profile image
+                  type: string
+                  format: binary
       responses:
         "200":
-          description: Perfil actualizado
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserResponse'
-        "400": { description: Datos de perfil o imagen inválidos }
-        "401": { description: Sesión inválida o expirada }
-        "404": { description: Usuario inexistente }
-        "500": { description: Error interno }
-  /v1/me/status:
-    put:
-      summary: Fijar o actualizar el estado personalizado del usuario autenticado
-      description: Cada campo es independiente entre sí. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia. Al menos uno de los dos debe estar presente.
+                $ref: "#/components/schemas/model.UserResponse"
+        "400":
+          description: invalid name/description/image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
       security:
-        - bearerAuth: []
+        - BearerAuth: []
+      summary: Edit my own profile
+      tags:
+        - profile
+  /v1/me/status:
+    delete:
+      responses:
+        "204":
+          description: no content
+        "401":
+          description: Unauthorized
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "404":
+          description: Not Found
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Clear my custom status
+      tags:
+        - profile
+    put:
+      description: A nil field means "don't touch it"; an empty string means "clear it".
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StatusUpdateRequest'
+              $ref: "#/components/schemas/model.StatusUpdateRequest"
+        description: Status text and/or emoji
+        required: true
       responses:
         "200":
-          description: Estado actualizado
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserResponse'
-        "400": { description: JSON inválido, ningún campo presente, o texto/emoji inválido }
-        "401": { description: Sesión inválida o expirada }
-        "404": { description: Usuario inexistente }
-        "500": { description: Error interno }
-    delete:
-      summary: Limpiar el estado personalizado del usuario autenticado
-      description: "Operación idempotente: borrar un estado ya vacío también responde 204."
+                $ref: "#/components/schemas/model.UserResponse"
+        "400":
+          description: invalid text/emoji, or no changes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
       security:
-        - bearerAuth: []
+        - BearerAuth: []
+      summary: Set my custom status
+      tags:
+        - profile
+  /v1/oauth/google:
+    post:
+      description: "CA1: creates a new account if the email is new. CA2: links to an
+        existing account by email. CA3: 503 if Google is unreachable, so the
+        client can offer email/password login instead."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/handler.googleLoginRequest"
+        description: Google ID token
+        required: true
       responses:
-        "204": { description: Estado limpiado }
-        "401": { description: Sesión inválida o expirada }
-        "404": { description: Usuario inexistente }
-        "500": { description: Error interno }
-  /v1/users/{id}:
-    get:
-      summary: Obtener el perfil público de un usuario
-      description: Devuelve los campos públicos del usuario indicado (nombre, descripción, avatar, estado, servidores en común). No incluye email ni fecha de registro.
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.AuthResponse"
+        "400":
+          description: missing id_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: token could not be validated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "503":
+          description: Google unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Log in / sign up with Google
+      tags:
+        - auth
+  /v1/password-recovery:
+    post:
+      description: Always responds 202 regardless of whether the email is registered
+        (doesn't leak which emails exist). Rate-limited per email.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.PasswordRecoveryRequest"
+        description: Email
+        required: true
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "429":
+          description: too many requests for this email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Request a password recovery email
+      tags:
+        - auth
+  /v1/password-reset:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.PasswordResetRequest"
+        description: Token, new password and confirmation
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+        "400":
+          description: passwords don't match, insecure password, or invalid/expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Reset the password using a recovery token
+      tags:
+        - auth
+  /v1/pin:
+    post:
+      description: Lets the caller log back in on this device with a short PIN instead
+        of the full password.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.ConfigurePinRequest"
+        description: Device ID and PIN (6-8 digits)
+        required: true
+      responses:
+        "204":
+          description: no content
+        "400":
+          description: missing fields, or PIN not 6-8 digits
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
       security:
-        - bearerAuth: []
+        - BearerAuth: []
+      summary: Set up a device PIN
+      tags:
+        - auth
+  /v1/pin/login:
+    post:
+      description: Alternative to email/password for a device that already configured a PIN.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.PinLoginRequest"
+        description: Device ID and PIN
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.AuthResponse"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: PIN not configured, incorrect, or malformed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: email not verified yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Log in with a device PIN
+      tags:
+        - auth
+  /v1/refresh:
+    post:
+      description: Reads the refresh token from the httpOnly cookie (no bearer token
+        needed -- this is how you get a new access token once the old one
+        expired). Rotates the refresh token and resets the cookie.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.AuthResponse"
+        "401":
+          description: missing, invalid, reused, or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Refresh the access token
+      tags:
+        - auth
+  /v1/users:
+    post:
+      description: Does NOT create a session (no token returned) -- register
+        separately, then log in.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.RegisterRequest"
+        description: Name, email and password
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.UserResponse"
+        "400":
+          description: invalid input, or insecure password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: email already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Register a new account
+      tags:
+        - auth
+  "/v1/users/{id}":
+    get:
+      description: Only the fields listed as public (name, photo, description, status,
+        mutual servers) -- never email or registration date.
       parameters:
-        - name: id
+        - description: Target user's ID
           in: path
+          name: id
           required: true
           schema:
             type: string
-            format: uuid
       responses:
         "200":
-          description: Perfil público obtenido correctamente
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PublicUserResponse'
+                $ref: "#/components/schemas/model.PublicUserResponse"
         "400":
-          description: El id no es un UUID válido
+          description: invalid user id
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/model.ErrorResponse"
         "401":
-          description: Sesión inválida o expirada
+          description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/model.ErrorResponse"
         "404":
-          description: Usuario inexistente
+          description: Not Found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Error interno
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /livez:
-    get:
-      summary: Liveness check
-      responses:
-        "200": { description: OK }
-  /readyz:
-    get:
-      summary: Readiness check
-      responses:
-        "200": { description: OK }
-        "503": { description: Dependencias no disponibles }
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Get another user's public profile
+      tags:
+        - profile
+servers:
+  - url: /
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    RefreshTokenCookie:
-      name: refresh_token
-      in: cookie
+  requestBodies:
+    model.TwoFactorPasswordRequest:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/model.TwoFactorPasswordRequest"
+      description: Account password
       required: true
-      description: Refresh token httpOnly enviado automáticamente por el navegador. No se establece manualmente desde el cliente.
-      schema:
-        type: string
-  headers:
-    SetRefreshTokenCookie:
-      description: Establece (o limpia, en logout) el refresh token como cookie httpOnly, Secure y SameSite=Strict.
-      schema:
-        type: string
+  securitySchemes:
+    BearerAuth:
+      description: Type "Bearer" followed by a space and the JWT.
+      in: header
+      name: Authorization
+      type: apiKey
   schemas:
-    RegisterRequest:
-      type: object
-      required: [name, email, password]
+    handler.googleLoginRequest:
       properties:
-        name:
+        id_token:
           type: string
-          minLength: 1
+      required:
+        - id_token
+      type: object
+    model.APIError:
+      properties:
+        code:
+          type: string
+        details:
+          additionalProperties: {}
+          type: object
+        message:
+          type: string
+      type: object
+    model.AuthResponse:
+      properties:
+        refresh_token:
+          type: string
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/model.UserResponse"
+      type: object
+    model.ConfigurePinRequest:
+      properties:
+        device_id:
+          type: string
+        pin:
+          type: string
+      required:
+        - device_id
+        - pin
+      type: object
+    model.EmailConfirmationRequest:
+      properties:
         email:
           type: string
-          format: email
+      required:
+        - email
+      type: object
+    model.EmailConfirmationTokenRequest:
+      properties:
+        token:
+          type: string
+      required:
+        - token
+      type: object
+    model.ErrorResponse:
+      properties:
+        error:
+          $ref: "#/components/schemas/model.APIError"
+      type: object
+    model.LoginRequest:
+      properties:
+        email:
+          type: string
         password:
           type: string
-          format: password
-          minLength: 8
-          description: Debe incluir al menos una mayúscula, una minúscula y un número.
-    LoginRequest:
+      required:
+        - email
+        - password
       type: object
-      required: [email, password]
+    model.PasswordRecoveryRequest:
       properties:
-        email: { type: string, format: email }
-        password: { type: string, format: password }
-    TwoFactorActivateRequest:
+        email:
+          type: string
+      required:
+        - email
       type: object
-      required: [code]
+    model.PasswordResetRequest:
+      properties:
+        confirm_password:
+          type: string
+        new_password:
+          type: string
+        token:
+          type: string
+      required:
+        - confirm_password
+        - new_password
+        - token
+      type: object
+    model.PinLoginRequest:
+      properties:
+        device_id:
+          type: string
+        pin:
+          type: string
+      required:
+        - device_id
+        - pin
+      type: object
+    model.PublicUserResponse:
+      properties:
+        avatar_url:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        mutual_server_ids:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        status_emoji:
+          type: string
+        status_text:
+          type: string
+      type: object
+    model.RegisterRequest:
+      properties:
+        email:
+          type: string
+        name:
+          type: string
+        password:
+          type: string
+      required:
+        - email
+        - name
+        - password
+      type: object
+    model.StatusUpdateRequest:
+      properties:
+        status_emoji:
+          type: string
+        status_text:
+          type: string
+      type: object
+    model.TwoFactorActivateRequest:
       properties:
         code:
           type: string
-          pattern: '^\d{6}$'
-          description: Código de 6 dígitos que muestra la app autenticadora en este momento.
-    TwoFactorVerifyRequest:
+      required:
+        - code
       type: object
-      required: [challenge_token, code]
+    model.TwoFactorChallengeResponse:
       properties:
         challenge_token:
           type: string
-          description: El token devuelto por POST /v1/login cuando la cuenta tiene 2FA activo.
-        code:
-          type: string
-          description: >-
-            Código de 6 dígitos de la app autenticadora, o un código de
-            recuperación de un solo uso (10 caracteres alfanuméricos, con o sin
-            guión; se normaliza mayúsculas/minúsculas y separadores).
-    TwoFactorPasswordRequest:
-      type: object
-      required: [password]
-      properties:
-        password:
-          type: string
-          format: password
-          description: La contraseña actual de la cuenta, reingresada para confirmar la operación.
-    TwoFactorChallengeResponse:
-      type: object
-      description: Respuesta de POST /v1/login cuando la cuenta tiene 2FA activo. No hay sesión todavía.
-      required: [two_factor_required, challenge_token, expires_in]
-      properties:
-        two_factor_required:
-          type: boolean
-          enum: [true]
-        challenge_token:
-          type: string
-          description: Identifica el login en curso. No es una credencial; no sirve para ningún endpoint autenticado.
         expires_in:
           type: integer
-          description: Segundos de validez del desafío.
-          example: 300
-    TwoFactorVerifyResponse:
-      allOf:
-        - $ref: '#/components/schemas/AuthResponse'
-        - type: object
-          properties:
-            recovery_code_used:
-              type: boolean
-              description: true si se entró con un código de recuperación. El cliente usa esto para recomendar regenerar la lista.
-            recovery_codes_remaining:
-              type: integer
-              description: Códigos de recuperación sin usar que quedan. Sólo viene cuando recovery_code_used es true.
-    TwoFactorSetupResponse:
+        two_factor_required:
+          type: boolean
       type: object
-      required: [secret, otpauth_url, issuer, account]
+    model.TwoFactorPasswordRequest:
       properties:
-        secret:
+        password:
           type: string
-          description: >-
-            Secreto TOTP: 20 bytes aleatorios (160 bits, lo que recomienda
-            RFC 4226 para HMAC-SHA1) codificados en base32 sin padding, lo que
-            da siempre 32 caracteres del alfabeto A-Z y 2-7. Se expone para el
-            caso "no puedo escanear el QR, lo ingreso a mano".
-          example: 2OJFAWEWK6QNRBYVQAHFJFCJXDGXGH2V
-        otpauth_url:
-          type: string
-          description: URI otpauth:// completa. El cliente la codifica como QR; el backend no devuelve imágenes.
-          example: otpauth://totp/Discordia:ada@example.com?algorithm=SHA1&digits=6&issuer=Discordia&period=30&secret=2OJFAWEWK6QNRBYVQAHFJFCJXDGXGH2V
-        issuer:
-          type: string
+      required:
+        - password
+      type: object
+    model.TwoFactorRecoveryCodesResponse:
+      properties:
+        recovery_codes:
+          items:
+            type: string
+          type: array
+      type: object
+    model.TwoFactorSetupResponse:
+      properties:
         account:
           type: string
-    TwoFactorStatusResponse:
+        issuer:
+          type: string
+        otpauth_url:
+          type: string
+        secret:
+          type: string
       type: object
-      required: [enabled, pending_activation, recovery_codes_remaining]
+    model.TwoFactorStatusResponse:
       properties:
         enabled:
           type: boolean
         pending_activation:
           type: boolean
-          description: Hay un secreto generado pero todavía sin confirmar. El login sigue siendo de un solo paso.
         recovery_codes_remaining:
           type: integer
-    TwoFactorRecoveryCodesResponse:
       type: object
-      required: [recovery_codes]
+    model.TwoFactorVerifyRequest:
       properties:
-        recovery_codes:
-          type: array
-          description: Códigos de un solo uso. Sólo se muestran en esta respuesta; después el servidor únicamente guarda su hash.
-          items:
-            type: string
-            example: A1B2C-D3E4F
-    GoogleLoginRequest:
-      type: object
-      required: [id_token]
-      properties:
-        id_token:
+        challenge_token:
           type: string
-          description: ID token JWT emitido por Google, con audiencia igual a GOOGLE_CLIENT_ID.
-    ConfigurePinRequest:
-      type: object
-      required: [pin, device_id]
-      properties:
-        pin:
+        code:
           type: string
-          pattern: '^\d{6,8}$'
-          description: PIN numérico de 6 a 8 dígitos.
-        device_id:
+      required:
+        - challenge_token
+        - code
+      type: object
+    model.TwoFactorVerifyResponse:
+      properties:
+        recovery_code_used:
+          type: boolean
+        recovery_codes_remaining:
+          type: integer
+        refresh_token:
           type: string
-          description: Identificador random generado y persistido por el cliente (no un ID de hardware). Único por instalación; a lo sumo un PIN activo por device_id.
-    PinLoginRequest:
-      type: object
-      required: [pin, device_id]
-      properties:
-        pin:
+        token:
           type: string
-          pattern: '^\d{6,8}$'
-        device_id:
-          type: string
-    PasswordRecoveryRequest:
-      type: object
-      required: [email]
-      properties:
-        email: { type: string, format: email }
-    PasswordResetRequest:
-      type: object
-      required: [token, new_password, confirm_password]
-      properties:
-        token: { type: string }
-        new_password:
-          type: string
-          format: password
-          minLength: 8
-        confirm_password:
-          type: string
-          format: password
-    EmailConfirmationRequest:
-      type: object
-      required: [email]
-      properties:
-        email: { type: string, format: email }
-    EmailConfirmationTokenRequest:
-      type: object
-      required: [token]
-      properties:
-        token: { type: string }
-    AuthResponse:
-      type: object
-      required: [user, access_token]
-      description: El refresh token nunca viaja en el body de la respuesta; se entrega únicamente como cookie httpOnly (ver header Set-Cookie).
-      properties:
         user:
-          $ref: '#/components/schemas/UserResponse'
-        access_token:
-          type: string
-          description: 'JWT de corta duración (~15 minutos) para autenticar requests con el header "Authorization: Bearer".'
-    UserResponse:
+          $ref: "#/components/schemas/model.UserResponse"
       type: object
-      required: [id, name, email, created_at]
+    model.UserResponse:
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        email: { type: string, format: email }
-        description: { type: string, maxLength: 500 }
-        avatar_url: { type: string, format: uri }
-        status_text: { type: string, maxLength: 64 }
-        status_emoji: { type: string, maxLength: 32 }
-        created_at: { type: string, format: date-time }
-    PublicUserResponse:
-      type: object
-      required: [id, name, avatar_url, mutual_server_ids]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        description: { type: string, maxLength: 500 }
-        avatar_url: { type: string, format: uri }
-        status_text: { type: string, maxLength: 64 }
-        status_emoji: { type: string, maxLength: 32 }
-        mutual_server_ids:
-          type: array
-          items: { type: string, format: uuid }
-          description: IDs de los servidores que el usuario autenticado (viewer) comparte con este usuario. No incluye nombre ni ícono del servidor (se resuelven aparte contra discordia-servers). Vacío si no comparten ninguno o si viewer == target.
-    StatusUpdateRequest:
-      type: object
-      description: Al menos uno de los dos campos debe estar presente. Omitir un campo lo deja sin cambios; enviarlo como cadena vacía lo limpia.
-      properties:
-        status_text:
+        avatar_url:
           type: string
-          maxLength: 64
-          description: Sin caracteres de control.
-        status_emoji:
+        created_at:
           type: string
-          maxLength: 32
-          description: Sin caracteres de control.
-    ProfileUpdateRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-          description: Letras Unicode, números, espacios, apóstrofes, guiones y puntos.
         description:
           type: string
-          maxLength: 500
-        image:
+        email:
           type: string
-          format: binary
-          description: Imagen JPEG, PNG o GIF de hasta 5 MiB y 4096x4096 píxeles.
-    ErrorResponse:
+        email_verified:
+          type: boolean
+        id:
+          type: string
+        name:
+          type: string
+        status_emoji:
+          type: string
+        status_text:
+          type: string
       type: object
-      required: [error]
-      properties:
-        error:
-          type: object
-          required: [code, message]
-          properties:
-            code: { type: string }
-            message: { type: string }
-            details:
-              type: object
-              additionalProperties: true
