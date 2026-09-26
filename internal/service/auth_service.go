@@ -38,7 +38,7 @@ const (
 
 type AuthService interface {
 	Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error)
-	Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error)
+	Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
 }
@@ -47,22 +47,42 @@ type EmailConfirmationRequester interface {
 	RequestEmailConfirmation(ctx context.Context, request model.EmailConfirmationRequest) error
 }
 
+type TwoFactorChallenger interface {
+	IsEnabled(ctx context.Context, userID string) (bool, error)
+	StartChallenge(ctx context.Context, userID string) (*model.TwoFactorChallengeResponse, error)
+}
+
 type authService struct {
 	repo                  repository.UserRepository
 	refreshRepo           repository.RefreshTokenRepository
 	confirmationRequester EmailConfirmationRequester
+	twoFactor             TwoFactorChallenger
 }
 
-func NewAuthService(repo repository.UserRepository, tokenRepo repository.RefreshTokenRepository, confirmationRequester ...EmailConfirmationRequester) AuthService {
+// AuthOption configura dependencias opcionales de authService. Son opciones y
+// no parametros porque el servicio funciona sin ellas: sin
+// EmailConfirmationRequester no manda el mail de alta, y sin
+// TwoFactorChallenger el login nunca pide segundo factor.
+type AuthOption func(*authService)
+
+func WithEmailConfirmation(requester EmailConfirmationRequester) AuthOption {
+	return func(s *authService) { s.confirmationRequester = requester }
+}
+
+func WithTwoFactor(challenger TwoFactorChallenger) AuthOption {
+	return func(s *authService) { s.twoFactor = challenger }
+}
+
+func NewAuthService(repo repository.UserRepository, tokenRepo repository.RefreshTokenRepository, opts ...AuthOption) AuthService {
 	var refreshRepo repository.RefreshTokenRepository
 	if tokenRepo != nil {
 		refreshRepo = tokenRepo
 	}
-	var requester EmailConfirmationRequester
-	if len(confirmationRequester) > 0 {
-		requester = confirmationRequester[0]
+	service := &authService{repo: repo, refreshRepo: refreshRepo}
+	for _, opt := range opts {
+		opt(service)
 	}
-	return &authService{repo: repo, refreshRepo: refreshRepo, confirmationRequester: requester}
+	return service
 }
 
 func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
@@ -106,7 +126,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 	return model.NewUserResponse(user), nil
 }
 
-func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.AuthResponse, error) {
+func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error) {
 	user, err := s.repo.GetByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
@@ -118,7 +138,25 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, ErrEmailNotVerified
 	}
 
-	return s.issueTokenPair(ctx, user, uuid.NewString())
+	if s.twoFactor != nil {
+		enabled, err := s.twoFactor.IsEnabled(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if enabled {
+			challenge, err := s.twoFactor.StartChallenge(ctx, user.ID)
+			if err != nil {
+				return nil, err
+			}
+			return &model.LoginResult{Challenge: challenge}, nil
+		}
+	}
+
+	auth, err := s.issueTokenPair(ctx, user, uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	return &model.LoginResult{Auth: auth}, nil
 }
 
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {

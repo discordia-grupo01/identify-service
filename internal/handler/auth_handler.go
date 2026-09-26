@@ -119,9 +119,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	setRefreshCookie(c, res.RefreshToken)
-	res.RefreshToken = ""
-	c.JSON(http.StatusOK, res)
+	if res.Challenge != nil {
+		c.JSON(http.StatusOK, res.Challenge)
+		return
+	}
+
+	setRefreshCookie(c, res.Auth.RefreshToken)
+	res.Auth.RefreshToken = ""
+	c.JSON(http.StatusOK, res.Auth)
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
