@@ -87,6 +87,15 @@ func NewAuthService(repo repository.UserRepository, tokenRepo repository.Refresh
 
 func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (*model.UserResponse, error) {
 
+	// Mismo criterio que PATCH /v1/me/profile: si no, se puede registrar un
+	// nombre que despues el propio usuario no puede volver a guardar. Sin esto
+	// un nombre de mas de 100 caracteres llegaba hasta la columna VARCHAR(100)
+	// y salia como 500 en vez de 400.
+	name, err := normalizeProfileName(req.Name)
+	if err != nil {
+		return nil, err
+	}
+
 	if !validatePassword(req.Password) {
 		return nil, ErrPasswordInsecure
 	}
@@ -106,7 +115,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 
 	user := &model.User{
 		ID:           uuid.NewString(),
-		Name:         req.Name,
+		Name:         name,
 		Email:        req.Email,
 		PasswordHash: sql.NullString{String: string(hashedPassword), Valid: true},
 	}

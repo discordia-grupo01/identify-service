@@ -74,6 +74,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 				},
 			})
 
+		case errors.Is(err, service.ErrInvalidProfileName):
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "INVALID_PROFILE",
+					Message: err.Error(),
+					Details: map[string]any{
+						"field":      "name",
+						"max_length": service.MaxNameRunes,
+					},
+				},
+			})
+
 		default:
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 				Error: model.APIError{
