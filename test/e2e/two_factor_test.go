@@ -183,15 +183,15 @@ func loginChallenge(t *testing.T, router *gin.Engine, emailAddress string, passw
 
 	body, _ := json.Marshal(model.LoginRequest{Email: emailAddress, Password: password})
 	recorder := doRequest(router, http.MethodPost, "/v1/login", body, "")
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusOK && recorder.Code != http.StatusAccepted {
 		t.Fatalf("login status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Code == http.StatusOK {
+		return ""
 	}
 
 	var challenge model.TwoFactorChallengeResponse
 	decodeJSON(t, recorder, &challenge)
-	if !challenge.TwoFactorRequired {
-		return ""
-	}
 	if challenge.ChallengeToken == "" {
 		t.Fatal("a two factor challenge must carry a token")
 	}
