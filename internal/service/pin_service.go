@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -16,9 +17,22 @@ var (
 	ErrPinInvalidFormat = errors.New("el PIN debe tener entre 6 y 8 dígitos numéricos")
 	ErrPinNotConfigured = errors.New("este dispositivo no tiene un PIN configurado")
 	ErrPinIncorrect     = errors.New("el PIN ingresado es incorrecto")
+	ErrPinLocked        = errors.New("demasiados intentos fallidos: el acceso por PIN quedó bloqueado temporalmente, iniciá sesión con tu email y contraseña")
 )
 
 var pinFormat = regexp.MustCompile(`^\d{6,8}$`)
+
+const (
+	maxPinAttempts  = 5
+	pinLockDuration = 15 * time.Minute
+)
+
+type PinLockedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *PinLockedError) Error() string { return ErrPinLocked.Error() }
+func (e *PinLockedError) Unwrap() error { return ErrPinLocked }
 
 type PinService interface {
 	ConfigurePin(ctx context.Context, userID string, deviceID string, pin string) error
@@ -69,8 +83,34 @@ func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin stri
 	if devicePin == nil {
 		return nil, ErrPinNotConfigured
 	}
+
+	if devicePin.LockedUntil != nil {
+		if devicePin.LockedUntil.After(time.Now()) {
+			return nil, &PinLockedError{RetryAfter: devicePin.LockedUntil.Sub(time.Now())}
+		}
+		if err := s.pinRepo.ResetFailedAttempts(ctx, deviceID); err != nil {
+			return nil, err
+		}
+		devicePin.FailedAttempts = 0
+		devicePin.LockedUntil = nil
+	}
+
 	if bcrypt.CompareHashAndPassword([]byte(devicePin.PinHash), []byte(pin)) != nil {
+		attempts, err := s.pinRepo.IncrementFailedAttempts(ctx, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		if attempts >= maxPinAttempts {
+			if err := s.pinRepo.Lock(ctx, deviceID, time.Now().Add(pinLockDuration)); err != nil {
+				return nil, err
+			}
+			return nil, &PinLockedError{RetryAfter: pinLockDuration}
+		}
 		return nil, ErrPinIncorrect
+	}
+
+	if err := s.pinRepo.ResetFailedAttempts(ctx, deviceID); err != nil {
+		return nil, err
 	}
 
 	user, err := s.userRepo.GetByID(ctx, devicePin.UserID)
