@@ -21,19 +21,28 @@ import (
 )
 
 var (
-	ErrPasswordInsecure    = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
-	ErrEmailInUse          = errors.New("el correo electrónico ya está registrado")
-	ErrInvalidCredentials  = errors.New("correo electrónico o contraseña inválidos")
-	ErrEmailNotVerified    = errors.New("el correo electrónico todavía no fue verificado")
-	ErrInexistentSession   = errors.New("la sesión no existe o ya ha sido revocada")
-	ErrInvalidRefreshToken = errors.New("token de actualización inválido o expirado")
-	ErrRefreshReused       = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
+	ErrPasswordInsecure      = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
+	ErrEmailInUse            = errors.New("el correo electrónico ya está registrado")
+	ErrInvalidCredentials    = errors.New("correo electrónico o contraseña inválidos")
+	ErrEmailNotVerified      = errors.New("el correo electrónico todavía no fue verificado")
+	ErrInexistentSession     = errors.New("la sesión no existe o ya ha sido revocada")
+	ErrInvalidRefreshToken   = errors.New("token de actualización inválido o expirado")
+	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
+	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
+	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
 )
 
 const (
 	AccessTokenTTL  = 15 * time.Minute
 	RefreshTokenTTL = 24 * 30 * time.Hour
 	jwtIssuer       = "discordia-issuer"
+
+	// Se cuenta por (email, ip) y no solo por email: bloquear la cuenta
+	// entera dejaria que cualquiera que sepa tu correo te saque de tu propia
+	// cuenta a proposito, sin necesidad de saber tu contrasena. Alguien que
+	// no comparte tu red solo se frena a si mismo.
+	loginAttemptWindow = 15 * time.Minute
+	maxLoginAttempts   = 5
 )
 
 type AuthService interface {
@@ -41,6 +50,10 @@ type AuthService interface {
 	Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
+	// SetPassword le da una contraseña a una cuenta que nunca tuvo una (alta
+	// puramente federada por Google): sin esto, esa cuenta no puede activar
+	// 2FA, porque no tendria como reingresarla para desactivarlo despues.
+	SetPassword(ctx context.Context, userID string, password string) error
 }
 
 type EmailConfirmationRequester interface {
@@ -57,6 +70,7 @@ type authService struct {
 	refreshRepo           repository.RefreshTokenRepository
 	confirmationRequester EmailConfirmationRequester
 	twoFactor             TwoFactorChallenger
+	loginAttempts         repository.LoginAttemptRepository
 }
 
 // AuthOption configura dependencias opcionales de authService. Son opciones y
@@ -71,6 +85,10 @@ func WithEmailConfirmation(requester EmailConfirmationRequester) AuthOption {
 
 func WithTwoFactor(challenger TwoFactorChallenger) AuthOption {
 	return func(s *authService) { s.twoFactor = challenger }
+}
+
+func WithLoginAttempts(repo repository.LoginAttemptRepository) AuthOption {
+	return func(s *authService) { s.loginAttempts = repo }
 }
 
 func NewAuthService(repo repository.UserRepository, tokenRepo repository.RefreshTokenRepository, opts ...AuthOption) AuthService {
@@ -136,12 +154,28 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 }
 
 func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error) {
+	if s.loginAttempts != nil {
+		count, err := s.loginAttempts.CountRecentFailures(ctx, req.Email, req.IP, time.Now().UTC().Add(-loginAttemptWindow))
+		if err != nil {
+			return nil, err
+		}
+		if count >= maxLoginAttempts {
+			return nil, ErrLoginAttemptsExceeded
+		}
+	}
+
 	user, err := s.repo.GetByEmail(ctx, req.Email)
 	if err != nil {
 		return nil, err
 	}
 	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
+		if s.loginAttempts != nil {
+			_ = s.loginAttempts.RecordFailure(ctx, req.Email, req.IP)
+		}
 		return nil, ErrInvalidCredentials
+	}
+	if s.loginAttempts != nil {
+		_ = s.loginAttempts.ClearFailures(ctx, req.Email, req.IP)
 	}
 	if !user.EmailVerified {
 		return nil, ErrEmailNotVerified
@@ -166,6 +200,29 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, err
 	}
 	return &model.LoginResult{Auth: auth}, nil
+}
+
+func (s *authService) SetPassword(ctx context.Context, userID string, password string) error {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if user.PasswordHash.Valid {
+		return ErrPasswordAlreadySet
+	}
+	if !validatePassword(password) {
+		return ErrPasswordInsecure
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
 }
 
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {

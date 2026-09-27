@@ -15,11 +15,14 @@ import (
 )
 
 type userRepositoryStub struct {
-	existingUser *model.User
-	getErr       error
-	createErr    error
-	updateErr    error
-	createdUser  *model.User
+	existingUser        *model.User
+	getErr              error
+	createErr           error
+	updateErr           error
+	createdUser         *model.User
+	updatePasswordErr   error
+	updatedPasswordHash string
+	updatedPasswordUser string
 }
 
 var _ repository.UserRepository = (*userRepositoryStub)(nil)
@@ -66,6 +69,18 @@ func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name str
 	return nil
 }
 
+func (r *userRepositoryStub) UpdatePasswordHash(_ context.Context, userID string, passwordHash string) error {
+	if r.updatePasswordErr != nil {
+		return r.updatePasswordErr
+	}
+	r.updatedPasswordUser = userID
+	r.updatedPasswordHash = passwordHash
+	if r.existingUser != nil {
+		r.existingUser.PasswordHash = sql.NullString{String: passwordHash, Valid: true}
+	}
+	return nil
+}
+
 func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusText *string, statusEmoji *string) (*model.User, error) {
 	if r.updateErr != nil {
 		return nil, r.updateErr
@@ -80,6 +95,42 @@ func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusTex
 		r.existingUser.StatusEmoji = *statusEmoji
 	}
 	return r.existingUser, nil
+}
+
+type loginAttemptRepositoryStub struct {
+	failures   map[string]int
+	countErr   error
+	recordErr  error
+	clearCalls int
+}
+
+func newLoginAttemptRepositoryStub() *loginAttemptRepositoryStub {
+	return &loginAttemptRepositoryStub{failures: make(map[string]int)}
+}
+
+var _ repository.LoginAttemptRepository = (*loginAttemptRepositoryStub)(nil)
+
+func loginAttemptKey(email, ip string) string { return email + "|" + ip }
+
+func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, _ time.Time) (int, error) {
+	if r.countErr != nil {
+		return 0, r.countErr
+	}
+	return r.failures[loginAttemptKey(email, ip)], nil
+}
+
+func (r *loginAttemptRepositoryStub) RecordFailure(_ context.Context, email string, ip string) error {
+	if r.recordErr != nil {
+		return r.recordErr
+	}
+	r.failures[loginAttemptKey(email, ip)]++
+	return nil
+}
+
+func (r *loginAttemptRepositoryStub) ClearFailures(_ context.Context, email string, ip string) error {
+	r.clearCalls++
+	delete(r.failures, loginAttemptKey(email, ip))
+	return nil
 }
 
 type refreshTokenRecord struct {
@@ -589,6 +640,129 @@ func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 	}
 }
 
+func TestAuthServiceLogin_BlocksAfterTooManyFailuresFromSameEmailAndIP(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts
+
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	// Contrasena CORRECTA: el bloqueo tiene que activarse antes de siquiera
+	// comparar el hash, no depender de que la contrasena este mal.
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "203.0.113.1",
+	})
+
+	if !errors.Is(err, ErrLoginAttemptsExceeded) {
+		t.Fatalf("Login() error = %v, want ErrLoginAttemptsExceeded", err)
+	}
+}
+
+func TestAuthServiceLogin_SameEmailDifferentIP_NotBlocked(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	// Un atacante agoto el limite para esta cuenta desde SU ip.
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts
+
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	// La dueña real, desde otra ip, no deberia quedar bloqueada.
+	result, err := service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "198.51.100.7",
+	})
+
+	if err != nil {
+		t.Fatalf("Login() from a different IP error = %v, want success", err)
+	}
+	if result == nil || result.Auth == nil {
+		t.Fatalf("Login() from a different IP must return a session: %+v", result)
+	}
+}
+
+func TestAuthServiceLogin_WrongPassword_RecordsFailure(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		Email:        "ada@example.com",
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "wrong-password",
+		IP:       "203.0.113.1",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() error = %v, want ErrInvalidCredentials", err)
+	}
+	if got := attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")]; got != 1 {
+		t.Errorf("recorded failures = %d, want 1", got)
+	}
+}
+
+func TestAuthServiceLogin_Success_ClearsFailures(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts - 1
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "203.0.113.1",
+	})
+
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if attempts.clearCalls != 1 {
+		t.Errorf("ClearFailures calls = %d, want 1", attempts.clearCalls)
+	}
+	if got := attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")]; got != 0 {
+		t.Errorf("failures after success = %d, want 0", got)
+	}
+}
+
 func TestAuthServiceLogoutRejectsAbsentToken(t *testing.T) {
 	refreshRepo := newRefreshTokenRepositoryStub()
 
@@ -737,6 +911,71 @@ func TestAuthServiceRefreshRejectsWhenUserNoLongerExists(t *testing.T) {
 
 	if !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("Refresh() error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
+func TestAuthServiceSetPasswordConfiguresAHashForAFederatedAccount(t *testing.T) {
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", Email: "ada@example.com"}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	if err := svc.SetPassword(context.Background(), user.ID, "Secure123"); err != nil {
+		t.Fatalf("SetPassword() error = %v", err)
+	}
+
+	if repo.updatedPasswordUser != user.ID {
+		t.Fatalf("UpdatePasswordHash() called for user %q, want %q", repo.updatedPasswordUser, user.ID)
+	}
+	if repo.updatedPasswordHash == "" || repo.updatedPasswordHash == "Secure123" {
+		t.Fatalf("password must be persisted as a bcrypt hash, never in plain text: %q", repo.updatedPasswordHash)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(repo.updatedPasswordHash), []byte("Secure123")) != nil {
+		t.Fatal("persisted hash does not match the password that was set")
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsAccountsThatAlreadyHaveOne(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Existing123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	user := &model.User{
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+	}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	err = svc.SetPassword(context.Background(), user.ID, "Secure123")
+
+	if !errors.Is(err, ErrPasswordAlreadySet) {
+		t.Fatalf("SetPassword() error = %v, want ErrPasswordAlreadySet", err)
+	}
+	if repo.updatedPasswordHash != "" {
+		t.Fatal("must not overwrite an existing password hash")
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsInsecurePasswords(t *testing.T) {
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	err := svc.SetPassword(context.Background(), user.ID, "weak")
+
+	if !errors.Is(err, ErrPasswordInsecure) {
+		t.Fatalf("SetPassword() error = %v, want ErrPasswordInsecure", err)
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsUnknownUser(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	svc := NewAuthService(repo, nil)
+
+	err := svc.SetPassword(context.Background(), "550e8400-e29b-41d4-a716-446655440099", "Secure123")
+
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("SetPassword() error = %v, want ErrUserNotFound", err)
 	}
 }
 

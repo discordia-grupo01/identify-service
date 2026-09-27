@@ -33,6 +33,14 @@ type EmailConfirmationTokenRequest struct {
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
+	// IP is set by the handler from the request's client IP, never bound
+	// from the request body -- it's what keys the per-(email,ip) brute-force
+	// throttle in AuthService.Login.
+	IP string `json:"-"`
+}
+
+type SetPasswordRequest struct {
+	Password string `json:"password" binding:"required"`
 }
 
 type PasswordResetRequest struct {

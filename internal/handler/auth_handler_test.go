@@ -10,23 +10,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type authServiceStub struct {
-	response      *model.AuthResponse
-	challenge     *model.TwoFactorChallengeResponse
-	registerUser  *model.UserResponse
-	err           error
-	request       model.RegisterRequest
-	loginRequest  model.LoginRequest
-	called        bool
-	logoutCalled  bool
-	logoutToken   string
-	refreshCalled bool
-	refreshToken  string
+	response         *model.AuthResponse
+	challenge        *model.TwoFactorChallengeResponse
+	registerUser     *model.UserResponse
+	err              error
+	request          model.RegisterRequest
+	loginRequest     model.LoginRequest
+	called           bool
+	logoutCalled     bool
+	logoutToken      string
+	refreshCalled    bool
+	refreshToken     string
+	setPasswordCalls []struct {
+		userID   string
+		password string
+	}
 }
 
 var _ service.AuthService = (*authServiceStub)(nil)
@@ -53,6 +58,14 @@ func (s *authServiceStub) Refresh(_ context.Context, refreshToken string) (*mode
 	s.refreshCalled = true
 	s.refreshToken = refreshToken
 	return s.response, s.err
+}
+
+func (s *authServiceStub) SetPassword(_ context.Context, userID string, password string) error {
+	s.setPasswordCalls = append(s.setPasswordCalls, struct {
+		userID   string
+		password string
+	}{userID: userID, password: password})
+	return s.err
 }
 
 func (s *authServiceStub) Logout(_ context.Context, refreshToken string) error {
@@ -403,6 +416,66 @@ func TestAuthHandlerLogoutMapsUnexpectedServiceError(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerSetPasswordConfiguresPasswordForTheAuthenticatedUser(t *testing.T) {
+	serviceStub := &authServiceStub{}
+
+	recorder := performSetPasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", `{"password":"Secure123"}`)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if len(serviceStub.setPasswordCalls) != 1 {
+		t.Fatalf("SetPassword() calls = %d, want 1", len(serviceStub.setPasswordCalls))
+	}
+	call := serviceStub.setPasswordCalls[0]
+	if call.userID != "550e8400-e29b-41d4-a716-446655440000" || call.password != "Secure123" {
+		t.Fatalf("unexpected call: %+v", call)
+	}
+}
+
+func TestAuthHandlerSetPasswordRejectsMissingPassword(t *testing.T) {
+	serviceStub := &authServiceStub{}
+
+	recorder := performSetPasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", `{}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if len(serviceStub.setPasswordCalls) != 0 {
+		t.Fatal("service must not be called without a password")
+	}
+}
+
+func TestAuthHandlerSetPasswordMapsInsecurePasswordToBadRequest(t *testing.T) {
+	serviceStub := &authServiceStub{err: service.ErrPasswordInsecure}
+
+	recorder := performSetPasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", `{"password":"weak"}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INSECURE_PASSWORD" {
+		t.Fatalf("error code = %q, want INSECURE_PASSWORD", response.Error.Code)
+	}
+}
+
+func TestAuthHandlerSetPasswordMapsAlreadySetToConflict(t *testing.T) {
+	serviceStub := &authServiceStub{err: service.ErrPasswordAlreadySet}
+
+	recorder := performSetPasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", `{"password":"Secure123"}`)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "PASSWORD_ALREADY_SET" {
+		t.Fatalf("error code = %q, want PASSWORD_ALREADY_SET", response.Error.Code)
+	}
+}
+
 func performRegisterRequest(t *testing.T, authService service.AuthService, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -455,6 +528,24 @@ func performLogoutRequest(t *testing.T, authService service.AuthService, refresh
 
 	router := gin.New()
 	router.POST("/v1/logout", NewAuthHandler(authService).Logout)
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performSetPasswordRequest(t *testing.T, authService service.AuthService, userID string, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/me/password", jsonBody(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	router := gin.New()
+	router.POST("/v1/me/password", func(c *gin.Context) {
+		if userID != "" {
+			c.Set(middleware.UserIDKey, userID)
+		}
+		NewAuthHandler(authService).SetPassword(c)
+	})
 	router.ServeHTTP(recorder, request)
 	return recorder
 }

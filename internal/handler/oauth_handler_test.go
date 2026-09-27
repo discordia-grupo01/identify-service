@@ -12,18 +12,25 @@ import (
 )
 
 type oauthServiceStub struct {
-	response *model.AuthResponse
-	err      error
-	called   bool
-	idToken  string
+	response  *model.AuthResponse
+	challenge *model.TwoFactorChallengeResponse
+	err       error
+	called    bool
+	idToken   string
 }
 
 var _ service.OAuthService = (*oauthServiceStub)(nil)
 
-func (s *oauthServiceStub) LoginWithGoogle(_ context.Context, idToken string) (*model.AuthResponse, error) {
+func (s *oauthServiceStub) LoginWithGoogle(_ context.Context, idToken string) (*model.LoginResult, error) {
 	s.called = true
 	s.idToken = idToken
-	return s.response, s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.challenge != nil {
+		return &model.LoginResult{Challenge: s.challenge}, nil
+	}
+	return &model.LoginResult{Auth: s.response}, nil
 }
 
 func performGoogleLoginRequest(t *testing.T, oauthService service.OAuthService, body string) *httptest.ResponseRecorder {
@@ -64,6 +71,32 @@ func TestOAuthHandlerLoginWithGoogleReturnsSessionOnSuccess(t *testing.T) {
 	decodeJSON(t, recorder, &response)
 	if response.RefreshToken != "" {
 		t.Fatal("refresh token must never be returned in the response body")
+	}
+}
+
+func TestOAuthHandlerLoginWithGoogleReturnsChallengeWhenAccountHasTwoFactor(t *testing.T) {
+	serviceStub := &oauthServiceStub{challenge: &model.TwoFactorChallengeResponse{
+		TwoFactorRequired: true,
+		ChallengeToken:    "challenge-token",
+		ExpiresIn:         300,
+	}}
+
+	recorder := performGoogleLoginRequest(t, serviceStub, `{"id_token":"raw-google-id-token"}`)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (accepted but not completed)", recorder.Code, http.StatusAccepted)
+	}
+
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == "refresh_token" {
+			t.Fatal("no session cookie must be set before the second factor is verified")
+		}
+	}
+
+	var response model.TwoFactorChallengeResponse
+	decodeJSON(t, recorder, &response)
+	if response.ChallengeToken != "challenge-token" {
+		t.Fatalf("challenge_token = %q, want challenge-token", response.ChallengeToken)
 	}
 }
 

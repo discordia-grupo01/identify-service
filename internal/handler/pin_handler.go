@@ -71,12 +71,13 @@ func (h *PinHandler) Configure(c *gin.Context) {
 
 // Login godoc
 // @Summary      Log in with a device PIN
-// @Description  Alternative to email/password for a device that already configured a PIN.
+// @Description  Alternative to email/password for a device that already configured a PIN. If the account has two-factor enabled, the PIN alone is not enough: the request is accepted (202) but not completed, no cookie is set, and the login is finished via POST /v1/login/2fa.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
 // @Param        body  body  model.PinLoginRequest  true  "Device ID and PIN"
-// @Success      200  {object}  model.AuthResponse
+// @Success      200  {object}  model.AuthResponse  "no two-factor on this account: session granted"
+// @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse
 // @Failure      401  {object}  model.ErrorResponse  "PIN not configured, incorrect, or malformed"
 // @Failure      403  {object}  model.ErrorResponse  "email not verified yet"
@@ -121,7 +122,12 @@ func (h *PinHandler) Login(c *gin.Context) {
 		return
 	}
 
-	setRefreshCookie(c, res.RefreshToken)
-	res.RefreshToken = ""
-	c.JSON(http.StatusOK, res)
+	if res.Challenge != nil {
+		c.JSON(http.StatusAccepted, res.Challenge)
+		return
+	}
+
+	setRefreshCookie(c, res.Auth.RefreshToken)
+	res.Auth.RefreshToken = ""
+	c.JSON(http.StatusOK, res.Auth)
 }

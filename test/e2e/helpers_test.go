@@ -6,8 +6,10 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +24,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/discordia-grupo01/identify-service/internal/utils/email"
+	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
 	"github.com/discordia-grupo01/identify-service/internal/utils/twofactor"
 
@@ -54,6 +57,60 @@ func (m *e2eConfirmationMailer) latest(emailAddress string) (email.EmailConfirma
 		return email.EmailConfirmationRequest{}, false
 	}
 	return messages[len(messages)-1], true
+}
+
+type e2ePasswordRecoveryMailer struct {
+	mu       sync.Mutex
+	messages map[string][]email.PasswordResetRequest
+}
+
+func (m *e2ePasswordRecoveryMailer) SendPasswordResetEmail(request email.PasswordResetRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.messages == nil {
+		m.messages = make(map[string][]email.PasswordResetRequest)
+	}
+	m.messages[request.Email] = append(m.messages[request.Email], request)
+	return nil
+}
+
+func (m *e2ePasswordRecoveryMailer) latest(emailAddress string) (email.PasswordResetRequest, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messages := m.messages[emailAddress]
+	if len(messages) == 0 {
+		return email.PasswordResetRequest{}, false
+	}
+	return messages[len(messages)-1], true
+}
+
+// fakeGoogleVerifier stands in for a real call to Google's JWKS endpoint:
+// e2e tests can't present a genuine Google-signed ID token, so they hand
+// this a claims-by-token map instead. An empty/unknown token is treated as
+// invalid, same as the real Verifier would.
+type fakeGoogleVerifier struct {
+	claimsByToken map[string]*googleoauth.Claims
+}
+
+func (v *fakeGoogleVerifier) Verify(_ context.Context, rawIDToken string) (*googleoauth.Claims, error) {
+	claims, ok := v.claimsByToken[rawIDToken]
+	if !ok {
+		return nil, errors.New("invalid id token")
+	}
+	return claims, nil
+}
+
+func resetToken(t *testing.T, request email.PasswordResetRequest) string {
+	t.Helper()
+	parsed, err := url.Parse(request.ResetURL)
+	if err != nil {
+		t.Fatalf("parse reset URL: %v", err)
+	}
+	token := parsed.Query().Get("token")
+	if token == "" {
+		t.Fatal("password reset email did not contain a token")
+	}
+	return token
 }
 
 func confirmationToken(t *testing.T, request email.EmailConfirmationRequest) string {
@@ -94,11 +151,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events, login_attempts RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, login_attempts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 
@@ -145,6 +202,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	authService := service.NewAuthService(userRepo, sessionRepo,
 		service.WithEmailConfirmation(confirmationService),
 		service.WithTwoFactor(twoFactorService),
+		service.WithLoginAttempts(repository.NewLoginAttemptRepository(db)),
 	)
 	authHandler := handler.NewAuthHandler(authService)
 	confirmationHandler := handler.NewEmailConfirmationHandler(confirmationService)
@@ -153,6 +211,21 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	membershipRepo := repository.NewServerMembershipRepository(db)
 	profileService := service.NewProfileService(userRepo, profileStorage, membershipRepo)
 	profileHandler := handler.NewProfileHandler(profileService)
+
+	pinService := service.NewPinService(repository.NewDevicePinRepository(db), userRepo, sessionRepo)
+	pinHandler := handler.NewPinHandler(pinService)
+
+	googleVerifier := &fakeGoogleVerifier{claimsByToken: map[string]*googleoauth.Claims{}}
+	oauthService := service.NewOAuthService(userRepo, repository.NewOAuthIdentityRepository(db), sessionRepo, googleVerifier)
+	oauthHandler := handler.NewOAuthHandler(oauthService)
+
+	passwordRecoveryMailer := &e2ePasswordRecoveryMailer{}
+	passwordRecoveryService := service.NewPasswordRecoveryService(
+		repository.NewPostgresPasswordRecoveryRepository(db),
+		userRepo,
+		passwordRecoveryMailer,
+	)
+	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
 
 	api := router.Group("/v1")
 	{
@@ -173,13 +246,24 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		api.POST("/me/2fa/activate", middleware.RequireAuth(), twoFactorHandler.Activate)
 		api.POST("/me/2fa/disable", middleware.RequireAuth(), twoFactorHandler.Disable)
 		api.POST("/me/2fa/recovery-codes", middleware.RequireAuth(), twoFactorHandler.RegenerateRecoveryCodes)
+		api.POST("/pin", middleware.RequireAuth(), pinHandler.Configure)
+		api.POST("/pin/login", pinHandler.Login)
+		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
+		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
+		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 	}
 	e2eMailers.Store(router, confirmationMailer)
+	e2ePasswordMailers.Store(router, passwordRecoveryMailer)
+	e2eGoogleVerifiers.Store(router, googleVerifier)
 
 	return router
 }
 
-var e2eMailers sync.Map
+var (
+	e2eMailers         sync.Map
+	e2ePasswordMailers sync.Map
+	e2eGoogleVerifiers sync.Map
+)
 
 func confirmationMailerFor(t *testing.T, router *gin.Engine) *e2eConfirmationMailer {
 	t.Helper()
@@ -188,6 +272,26 @@ func confirmationMailerFor(t *testing.T, router *gin.Engine) *e2eConfirmationMai
 		t.Fatal("confirmation mailer was not registered for test router")
 	}
 	return mailer.(*e2eConfirmationMailer)
+}
+
+func passwordRecoveryMailerFor(t *testing.T, router *gin.Engine) *e2ePasswordRecoveryMailer {
+	t.Helper()
+	mailer, ok := e2ePasswordMailers.Load(router)
+	if !ok {
+		t.Fatal("password recovery mailer was not registered for test router")
+	}
+	return mailer.(*e2ePasswordRecoveryMailer)
+}
+
+// googleVerifierFor lets a test register the claims a given ID token should
+// resolve to, since there's no real Google to hand the router a genuine one.
+func googleVerifierFor(t *testing.T, router *gin.Engine) *fakeGoogleVerifier {
+	t.Helper()
+	verifier, ok := e2eGoogleVerifiers.Load(router)
+	if !ok {
+		t.Fatal("google verifier was not registered for test router")
+	}
+	return verifier.(*fakeGoogleVerifier)
 }
 
 // registerAndLogin crea un usuario real (POST /v1/users) y lo loguea

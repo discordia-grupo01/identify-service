@@ -86,7 +86,7 @@ identify-service/
 
 ## Comandos (Makefile)
 - `make run` - corre el servicio localmente (`go run ./cmd/api`).
-- `make test` - corre los tests con cobertura (`go test ./... -cover`).
+- `make test` - corre los tests con cobertura (`go test ./... -coverpkg=./internal/... -cover`). El `-coverpkg` es necesario porque `test/e2e` ejercita `internal/repository` a traves del router real: sin el, esos paquetes aparecen en 0% aunque esten cubiertos.
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - corre las migraciones (golang-migrate) contra la BDD que indique `.env` (local o Supabase).
 - `make openapi` - regenera `openapi.yaml` desde las anotaciones swag de los handlers (`internal/handler/**`). Necesita Go y Node. No hace falta correrlo a mano: el CI lo corre en cada push/PR y, si detecta que cambió, commitea `openapi.yaml` solo de vuelta a la rama.
@@ -117,12 +117,12 @@ Los tests e2e comprueban el flujo real de confirmacion: el login se rechaza ante
 ## Supabase (produccion)
 Este servicio no usa Supabase Auth: el login/JWT/sesiones son 100% propios. "Migrar a Supabase" es solo cambiar a que Postgres se conecta, no la logica de auth.
 
-El proyecto de Supabase es **compartido entre todos los servicios de Discordia** (un solo proyecto, un schema por servicio). Pasos:
-1. Una sola vez por proyecto de Supabase: crear el schema de este servicio. Se puede hacer sin SQL desde **Database > Schemas > New schema** (nombre `identify`), o corriendo en el SQL Editor:
+Cada servicio de Discordia tiene su **propio proyecto de Supabase** (no comparten uno solo) -- este servicio usa el proyecto `discordia-identity`. Pasos:
+1. Opcional: si queres organizar las tablas en un schema propio en vez de `public`, crealo una sola vez desde **Database > Schemas > New schema** (nombre `identify`), o corriendo en el SQL Editor:
    ```sql
    CREATE SCHEMA IF NOT EXISTS identify;
    ```
-2. Completar en tu `.env` los datos de conexion de Supabase, tomados del boton **Connect** del proyecto, pestaña **Session pooler** (no "Direct connection": ese host solo resuelve por IPv6 y muchas redes no tienen esa salida; tampoco "Transaction pooler", que no sostiene el `search_path` por conexion):
+2. Completar en tu `.env` los datos de conexion del proyecto `discordia-identity`, tomados del boton **Connect**, pestaña **Session pooler** (no "Direct connection": ese host solo resuelve por IPv6 y muchas redes no tienen esa salida; tampoco "Transaction pooler", que no sostiene el `search_path` por conexion):
    ```
    DATABASE_HOST=aws-0-<region>.pooler.supabase.com
    DATABASE_PORT=5432
@@ -136,19 +136,20 @@ El proyecto de Supabase es **compartido entre todos los servicios de Discordia**
 
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
-- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body. **Si la cuenta tiene segundo factor activo, responde 202 (Accepted) en vez de 200**: trae `two_factor_required: true` + `challenge_token` y no setea cookie. El cliente sigue distinguiendo las dos respuestas por el campo `two_factor_required` (no por el código HTTP): el 202 solo existe para que la documentación de la API sea correcta.
+- `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body. **Si la cuenta tiene segundo factor activo, responde 202 (Accepted) en vez de 200**: trae `two_factor_required: true` + `challenge_token` y no setea cookie. El cliente sigue distinguiendo las dos respuestas por el campo `two_factor_required` (no por el código HTTP): el 202 solo existe para que la documentación de la API sea correcta. **429 (`LOGIN_ATTEMPTS_EXCEEDED`)** si hubo 5 intentos fallidos en los ultimos 15 minutos para esa combinacion de email + IP de origen -- se cuenta por (email, ip) y no por cuenta entera, para que nadie pueda bloquear la cuenta de otra persona solo sabiendo su email (ver `AuthService.Login` / `login_attempts`). Ademas, el gateway (Kong) limita `/v1/login` a 60 req/min por IP como proteccion adicional contra volumen.
 - `POST /v1/login/2fa` - segundo paso del login. Acepta tanto el codigo de 6 digitos de la app autenticadora como uno de los codigos de recuperacion de un solo uso (se distinguen por el formato). El desafio dura 5 minutos, se consume al primer codigo aceptado y se quema a los 5 intentos fallidos. Publico: quien lo llama todavia no tiene sesion.
 - `GET /v1/me/2fa` - estado del segundo factor de la cuenta (activo, pendiente de confirmar, codigos de recuperacion sin usar). Requiere Bearer JWT.
 - `POST /v1/me/2fa/setup` - genera el secreto TOTP y devuelve la URI `otpauth://` para que el cliente dibuje el QR (el backend no devuelve imagenes). No activa nada: el 2FA queda pendiente. Llamarlo dos veces devuelve el mismo secreto pendiente, para no invalidar un QR ya escaneado. Requiere Bearer JWT.
 - `POST /v1/me/2fa/activate` - confirma el QR con un codigo de la app, activa el 2FA y devuelve los codigos de recuperacion. Es la unica respuesta donde los codigos viajan en claro: despues solo queda su hash. Requiere Bearer JWT.
 - `POST /v1/me/2fa/disable` - desactiva el segundo factor reingresando la contraseña, y borra secreto, codigos y desafios pendientes. Requiere Bearer JWT.
 - `POST /v1/me/2fa/recovery-codes` - regenera la lista de codigos de recuperacion (invalida la anterior completa) reingresando la contraseña. Requiere Bearer JWT.
+- `POST /v1/me/password` - le da una contraseña a una cuenta que nunca tuvo una (alta puramente federada por Google). No es un cambio de contraseña: responde 409 (`PASSWORD_ALREADY_SET`) si la cuenta ya tiene una. Paso previo obligatorio para activar el 2FA en esas cuentas (`POST /v1/me/2fa/setup` responde 409 `PASSWORD_REQUIRED_FOR_TWO_FACTOR` si todavia no la tienen) -- sin contraseña, no habria forma de reingresarla despues para desactivar el 2FA o regenerar codigos de recuperacion. Requiere Bearer JWT.
 - `POST /v1/email-confirmation` - solicita o reenvia el email de confirmacion. Responde de forma generica para no revelar si un email esta registrado y aplica un limite de solicitudes.
 - `POST /v1/email-confirmation/confirm` - confirma el email usando el token recibido. El token es de un solo uso y expira segun `EMAIL_CONFIRMATION_EXPIRATION`.
 - `POST /v1/refresh` - rota el refresh token (via cookie) y devuelve un access token y un refresh token nuevos. Si el refresh token ya fue rotado antes y se reutiliza, se revoca toda la sesion (se asume robo).
 - `POST /v1/logout` - revoca el refresh token de la sesion actual (via cookie) y limpia la cookie. El access token vigente en ese momento sigue siendo valido hasta que expira solo (maximo ~15 min), pero ya no se puede renovar.
 - `POST /v1/pin` - activa (o reemplaza) el PIN de acceso rapido (6 a 8 digitos) para este dispositivo (historia "Registro con PIN"). Requiere Bearer JWT; el PIN se guarda hasheado con bcrypt, nunca en texto plano.
-- `POST /v1/pin/login` - login rapido solo con PIN y `device_id`, sin pedir email. Solo funciona en un dispositivo que ya tiene un PIN configurado via `POST /v1/pin`; en cualquier otro dispositivo no hay PIN asociado y siempre falla. Devuelve la misma forma de respuesta que `/v1/login`.
+- `POST /v1/pin/login` - login rapido solo con PIN y `device_id`, sin pedir email. Solo funciona en un dispositivo que ya tiene un PIN configurado via `POST /v1/pin`; en cualquier otro dispositivo no hay PIN asociado y siempre falla. Devuelve la misma forma de respuesta que `/v1/login`, incluido el 202 con el desafio de 2FA si la cuenta lo tiene activo: el PIN no es una forma de esquivarlo.
 - `POST /v1/password-recovery` - solicita el email de recuperacion de contraseña.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.

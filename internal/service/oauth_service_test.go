@@ -56,6 +56,10 @@ func (r *oauthUserRepositoryStub) UpdateStatus(_ context.Context, _ string, _ *s
 	return nil, nil
 }
 
+func (r *oauthUserRepositoryStub) UpdatePasswordHash(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 type oauthIdentityRepositoryStub struct {
 	byProviderSubject map[string]*model.OAuthIdentity
 	createErr         error
@@ -90,6 +94,37 @@ func (v *googleVerifierStub) Verify(_ context.Context, _ string) (*googleoauth.C
 	return v.claims, v.err
 }
 
+// twoFactorChallengerStub sirve tanto para oauth_service_test.go como para
+// pin_service_test.go: en ambos casos alcanza con simular una cuenta con 2FA
+// activo, sin reimplementar TwoFactorService entero.
+type twoFactorChallengerStub struct {
+	enabledUserIDs map[string]bool
+	challenge      *model.TwoFactorChallengeResponse
+	isEnabledErr   error
+	startErr       error
+	startedForUser string
+}
+
+var _ TwoFactorChallenger = (*twoFactorChallengerStub)(nil)
+
+func (c *twoFactorChallengerStub) IsEnabled(_ context.Context, userID string) (bool, error) {
+	if c.isEnabledErr != nil {
+		return false, c.isEnabledErr
+	}
+	return c.enabledUserIDs[userID], nil
+}
+
+func (c *twoFactorChallengerStub) StartChallenge(_ context.Context, userID string) (*model.TwoFactorChallengeResponse, error) {
+	c.startedForUser = userID
+	if c.startErr != nil {
+		return nil, c.startErr
+	}
+	if c.challenge != nil {
+		return c.challenge, nil
+	}
+	return &model.TwoFactorChallengeResponse{TwoFactorRequired: true, ChallengeToken: "challenge-token", ExpiresIn: 300}, nil
+}
+
 func TestOAuthServiceLoginWithGoogleCreatesNewAccount(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	userRepo := &oauthUserRepositoryStub{}
@@ -104,13 +139,13 @@ func TestOAuthServiceLoginWithGoogleCreatesNewAccount(t *testing.T) {
 	}}
 	svc := NewOAuthService(userRepo, identityRepo, refreshRepo, verifier)
 
-	response, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
+	result, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
 
 	if err != nil {
 		t.Fatalf("LoginWithGoogle() error = %v", err)
 	}
-	if response == nil || response.Token == "" || response.RefreshToken == "" {
-		t.Fatalf("unexpected response: %+v", response)
+	if result == nil || result.Auth == nil || result.Auth.Token == "" || result.Auth.RefreshToken == "" {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 	if len(userRepo.created) != 1 {
 		t.Fatalf("created users = %d, want 1 (CA1: cuenta nueva)", len(userRepo.created))
@@ -148,13 +183,13 @@ func TestOAuthServiceLoginWithGoogleLinksExistingAccountByEmail(t *testing.T) {
 	}}
 	svc := NewOAuthService(userRepo, identityRepo, refreshRepo, verifier)
 
-	response, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
+	result, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
 
 	if err != nil {
 		t.Fatalf("LoginWithGoogle() error = %v", err)
 	}
-	if response.User.ID != existing.ID {
-		t.Fatalf("CA2: expected the session to belong to the existing account %q, got %q", existing.ID, response.User.ID)
+	if result.Auth == nil || result.Auth.User.ID != existing.ID {
+		t.Fatalf("CA2: expected the session to belong to the existing account %q, got %+v", existing.ID, result)
 	}
 	if len(userRepo.created) != 0 {
 		t.Fatal("CA2: must not create a new account when the email already exists")
@@ -176,13 +211,13 @@ func TestOAuthServiceLoginWithGoogleReusesLinkedIdentityOnReturningLogin(t *test
 	verifier := &googleVerifierStub{claims: &googleoauth.Claims{Subject: "google-subject-1", Email: "ada@example.com", EmailVerified: true}}
 	svc := NewOAuthService(userRepo, identityRepo, refreshRepo, verifier)
 
-	response, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
+	result, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
 
 	if err != nil {
 		t.Fatalf("LoginWithGoogle() error = %v", err)
 	}
-	if response.User.ID != existing.ID {
-		t.Fatalf("unexpected user in response: %+v", response.User)
+	if result.Auth == nil || result.Auth.User.ID != existing.ID {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 	if len(userRepo.created) != 0 || len(identityRepo.created) != 0 {
 		t.Fatal("a returning federated login must not create a new user nor a new identity row")
@@ -208,5 +243,60 @@ func TestOAuthServiceLoginWithGoogleMapsInvalidToken(t *testing.T) {
 
 	if !errors.Is(err, ErrOAuthTokenInvalid) {
 		t.Fatalf("LoginWithGoogle() error = %v, want ErrOAuthTokenInvalid", err)
+	}
+}
+
+func TestOAuthServiceLoginWithGoogleReturnsChallengeWhenAccountHasTwoFactor(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	existing := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", Email: "ada@example.com"}
+	userRepo := &oauthUserRepositoryStub{byID: map[string]*model.User{existing.ID: existing}}
+	identityRepo := newOAuthIdentityRepositoryStub()
+	identityRepo.byProviderSubject["google:google-subject-1"] = &model.OAuthIdentity{
+		UserID: existing.ID, Provider: googleProvider, ProviderSubject: "google-subject-1",
+	}
+	refreshRepo := newRefreshTokenRepositoryStub()
+	verifier := &googleVerifierStub{claims: &googleoauth.Claims{Subject: "google-subject-1", Email: "ada@example.com", EmailVerified: true}}
+	challenger := &twoFactorChallengerStub{enabledUserIDs: map[string]bool{existing.ID: true}}
+	svc := NewOAuthService(userRepo, identityRepo, refreshRepo, verifier, WithOAuthTwoFactor(challenger))
+
+	result, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
+
+	if err != nil {
+		t.Fatalf("LoginWithGoogle() error = %v", err)
+	}
+	if result.Auth != nil {
+		t.Fatalf("expected no session to be granted before the second factor, got %+v", result.Auth)
+	}
+	if result.Challenge == nil || !result.Challenge.TwoFactorRequired {
+		t.Fatalf("expected a two-factor challenge, got %+v", result)
+	}
+	if challenger.startedForUser != existing.ID {
+		t.Fatalf("StartChallenge() called for user %q, want %q (2FA must not be skippable via Google login)", challenger.startedForUser, existing.ID)
+	}
+	if len(refreshRepo.tokens) != 0 {
+		t.Fatal("no refresh token should be issued while the second factor is pending")
+	}
+}
+
+func TestOAuthServiceLoginWithGoogleSkipsChallengeWhenTwoFactorDisabled(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	existing := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", Email: "ada@example.com"}
+	userRepo := &oauthUserRepositoryStub{byID: map[string]*model.User{existing.ID: existing}}
+	identityRepo := newOAuthIdentityRepositoryStub()
+	identityRepo.byProviderSubject["google:google-subject-1"] = &model.OAuthIdentity{
+		UserID: existing.ID, Provider: googleProvider, ProviderSubject: "google-subject-1",
+	}
+	refreshRepo := newRefreshTokenRepositoryStub()
+	verifier := &googleVerifierStub{claims: &googleoauth.Claims{Subject: "google-subject-1", Email: "ada@example.com", EmailVerified: true}}
+	challenger := &twoFactorChallengerStub{}
+	svc := NewOAuthService(userRepo, identityRepo, refreshRepo, verifier, WithOAuthTwoFactor(challenger))
+
+	result, err := svc.LoginWithGoogle(context.Background(), "raw-id-token")
+
+	if err != nil {
+		t.Fatalf("LoginWithGoogle() error = %v", err)
+	}
+	if result.Challenge != nil || result.Auth == nil || result.Auth.Token == "" {
+		t.Fatalf("expected a normal session without 2FA, got %+v", result)
 	}
 }
