@@ -712,12 +712,12 @@ paths:
         - auth
   /v1/pin/login:
     post:
-      description: Alternative to email/password for a device that already configured
+      description: "Alternative to email/password for a device that already configured
         a PIN. If the account has two-factor enabled, the PIN alone is not
         enough: the request is accepted (202) but not completed, no cookie is
-        set, and the login is finished via POST /v1/login/2fa." After too many wrong PINs in a row, the device is temporarily
-        locked out of PIN login (423) and must fall back to POST /v1/login with
-        email and password.
+        set, and the login is finished via POST /v1/login/2fa. After too many
+        wrong PINs in a row, the device is temporarily locked out of PIN login
+        (423) and must fall back to POST /v1/login with email and password."
       requestBody:
         content:
           application/json:
@@ -757,8 +757,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.ErrorResponse"
         "423":
-          description: too many failed PIN attempts -- temporarily locked,
-            fall back to email+password
+          description: "too many failed PIN attempts: temporarily locked, fall back to
+            email+password"
           content:
             application/json:
               schema:
