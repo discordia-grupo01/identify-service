@@ -89,9 +89,11 @@ func main() {
 	)
 	pinHandler := handler.NewPinHandler(pinService)
 
+	loginAttemptRepo := repository.NewLoginAttemptRepository(dbConnection)
 	authService := service.NewAuthService(userRepo, refreshRepo,
 		service.WithEmailConfirmation(emailConfirmationService),
 		service.WithTwoFactor(twoFactorService),
+		service.WithLoginAttempts(loginAttemptRepo),
 	)
 	authHandler := handler.NewAuthHandler(authService)
 	profileImageStorage := newProfileImageStorage()

@@ -191,6 +191,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		})
 		return
 	}
+	req.IP = c.ClientIP()
 
 	res, err := h.service.Login(c.Request.Context(), req)
 	if err != nil {
@@ -206,6 +207,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 				Error: model.APIError{
 					Code:    "INVALID_CREDENTIALS",
 					Message: "El correo electrónico o la contraseña son incorrectos",
+				},
+			})
+			return
+		case errors.Is(err, service.ErrLoginAttemptsExceeded):
+			c.JSON(http.StatusTooManyRequests, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "LOGIN_ATTEMPTS_EXCEEDED",
+					Message: "Demasiados intentos fallidos. Esperá unos minutos y probá de nuevo",
 				},
 			})
 			return
