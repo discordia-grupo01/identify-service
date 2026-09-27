@@ -16,13 +16,13 @@ import (
 )
 
 var (
-	ErrTwoFactorAlreadyEnabled   = errors.New("el segundo factor ya está activo en esta cuenta")
-	ErrTwoFactorNotEnabled       = errors.New("el segundo factor no está activo en esta cuenta")
-	ErrTwoFactorSetupMissing     = errors.New("primero hay que escanear el código QR")
-	ErrTwoFactorCodeInvalid      = errors.New("el código de verificación es incorrecto o expiró")
-	ErrTwoFactorChallengeInvalid = errors.New("la verificación expiró, volvé a iniciar sesión")
-	ErrTwoFactorTooManyAttempts  = errors.New("demasiados intentos fallidos, volvé a iniciar sesión")
-	ErrPasswordMismatch          = errors.New("la contraseña es incorrecta")
+	ErrTwoFactorAlreadyEnabled      = errors.New("el segundo factor ya está activo en esta cuenta")
+	ErrTwoFactorNotEnabled          = errors.New("el segundo factor no está activo en esta cuenta")
+	ErrTwoFactorSetupMissing        = errors.New("primero hay que escanear el código QR")
+	ErrTwoFactorCodeInvalid         = errors.New("el código de verificación es incorrecto o expiró")
+	ErrTwoFactorChallengeInvalid    = errors.New("la verificación expiró, volvé a iniciar sesión")
+	ErrTwoFactorTooManyAttempts     = errors.New("demasiados intentos fallidos, volvé a iniciar sesión")
+	ErrPasswordMismatch             = errors.New("la contraseña es incorrecta")
 	ErrPasswordRequiredForTwoFactor = errors.New("primero tenés que configurar una contraseña para esta cuenta")
 )
 

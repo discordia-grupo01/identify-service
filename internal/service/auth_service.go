@@ -29,7 +29,7 @@ var (
 	ErrInvalidRefreshToken   = errors.New("token de actualización inválido o expirado")
 	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
-	ErrPasswordAlreadySet  = errors.New("la cuenta ya tiene una contraseña configurada")
+	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
 )
 
 const (
