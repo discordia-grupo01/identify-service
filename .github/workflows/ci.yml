@@ -71,7 +71,16 @@ jobs:
           sudo mv migrate /usr/local/bin/migrate
       - name: Migrar la base de test
         run: migrate -path=migrations -database "postgres://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME?sslmode=$DATABASE_SSLMODE" up
-      - run: go test ./... -coverpkg=./internal/... -cover
+      - name: Tests (con cobertura)
+        run: go test ./... -coverpkg=./internal/... -coverprofile=coverage.out
+      - name: Verificar cobertura minima (70%)
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Cobertura total: ${COVERAGE}%"
+          if awk "BEGIN {exit !($COVERAGE < 70)}"; then
+            echo "::error::Cobertura ${COVERAGE}% por debajo del minimo requerido (70%)"
+            exit 1
+          fi
 
   # Construye la imagen y la publica en Artifact Registry. Solo corre en push a
   # main y despues de que pase `test`. Se autentica con Workload Identity
