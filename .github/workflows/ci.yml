@@ -71,7 +71,7 @@ jobs:
           sudo mv migrate /usr/local/bin/migrate
       - name: Migrar la base de test
         run: migrate -path=migrations -database "postgres://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME?sslmode=$DATABASE_SSLMODE" up
-      - run: go test ./... -cover
+      - run: go test ./... -coverpkg=./internal/... -cover
 
   # Construye la imagen y la publica en Artifact Registry. Solo corre en push a
   # main y despues de que pase `test`. Se autentica con Workload Identity
