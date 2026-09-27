@@ -13,7 +13,7 @@ import (
 
 const (
 	refreshCookieName = "refresh_token"
-	refreshCookiePath = "/v1/auth"
+	refreshCookiePath = "/v1/"
 )
 
 type AuthHandler struct {
