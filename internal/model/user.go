@@ -35,6 +35,10 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type SetPasswordRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
 type PasswordResetRequest struct {
 	Token           string `json:"token" binding:"required"`
 	NewPassword     string `json:"new_password" binding:"required"`

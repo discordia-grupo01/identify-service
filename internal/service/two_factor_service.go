@@ -23,6 +23,7 @@ var (
 	ErrTwoFactorChallengeInvalid = errors.New("la verificación expiró, volvé a iniciar sesión")
 	ErrTwoFactorTooManyAttempts  = errors.New("demasiados intentos fallidos, volvé a iniciar sesión")
 	ErrPasswordMismatch          = errors.New("la contraseña es incorrecta")
+	ErrPasswordRequiredForTwoFactor = errors.New("primero tenés que configurar una contraseña para esta cuenta")
 )
 
 const (
@@ -101,6 +102,9 @@ func (s *twoFactorService) StartSetup(ctx context.Context, userID string) (*mode
 	}
 	if user == nil {
 		return nil, ErrInvalidCredentials
+	}
+	if !user.PasswordHash.Valid {
+		return nil, ErrPasswordRequiredForTwoFactor
 	}
 
 	existing, err := s.repo.GetByUserID(ctx, userID)
