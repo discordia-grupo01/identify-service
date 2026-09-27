@@ -21,9 +21,10 @@ type pinServiceStub struct {
 		pin      string
 	}
 
-	loginResponse *model.AuthResponse
-	loginErr      error
-	loginArgs     struct {
+	loginResponse  *model.AuthResponse
+	loginChallenge *model.TwoFactorChallengeResponse
+	loginErr       error
+	loginArgs      struct {
 		deviceID string
 		pin      string
 	}
@@ -39,10 +40,16 @@ func (s *pinServiceStub) ConfigurePin(_ context.Context, userID string, deviceID
 	return s.configureErr
 }
 
-func (s *pinServiceStub) LoginWithPin(_ context.Context, deviceID string, pin string) (*model.AuthResponse, error) {
+func (s *pinServiceStub) LoginWithPin(_ context.Context, deviceID string, pin string) (*model.LoginResult, error) {
 	s.loginArgs.deviceID = deviceID
 	s.loginArgs.pin = pin
-	return s.loginResponse, s.loginErr
+	if s.loginErr != nil {
+		return nil, s.loginErr
+	}
+	if s.loginChallenge != nil {
+		return &model.LoginResult{Challenge: s.loginChallenge}, nil
+	}
+	return &model.LoginResult{Auth: s.loginResponse}, nil
 }
 
 func performConfigurePinRequest(t *testing.T, pinService service.PinService, userID string, body string) *httptest.ResponseRecorder {
@@ -148,6 +155,32 @@ func TestPinHandlerLoginReturnsSessionOnSuccessWithoutRequiringEmail(t *testing.
 	decodeJSON(t, recorder, &response)
 	if response.RefreshToken != "" {
 		t.Fatal("refresh token must never be returned in the response body")
+	}
+}
+
+func TestPinHandlerLoginReturnsChallengeWhenAccountHasTwoFactor(t *testing.T) {
+	serviceStub := &pinServiceStub{loginChallenge: &model.TwoFactorChallengeResponse{
+		TwoFactorRequired: true,
+		ChallengeToken:    "challenge-token",
+		ExpiresIn:         300,
+	}}
+
+	recorder := performPinLoginRequest(t, serviceStub, `{"pin":"123456","device_id":"device-1"}`)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (accepted but not completed)", recorder.Code, http.StatusAccepted)
+	}
+
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == "refresh_token" {
+			t.Fatal("no session cookie must be set before the second factor is verified")
+		}
+	}
+
+	var response model.TwoFactorChallengeResponse
+	decodeJSON(t, recorder, &response)
+	if response.ChallengeToken != "challenge-token" {
+		t.Fatalf("challenge_token = %q, want challenge-token", response.ChallengeToken)
 	}
 }
 
