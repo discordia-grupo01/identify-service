@@ -82,6 +82,42 @@ func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusTex
 	return r.existingUser, nil
 }
 
+type loginAttemptRepositoryStub struct {
+	failures   map[string]int
+	countErr   error
+	recordErr  error
+	clearCalls int
+}
+
+func newLoginAttemptRepositoryStub() *loginAttemptRepositoryStub {
+	return &loginAttemptRepositoryStub{failures: make(map[string]int)}
+}
+
+var _ repository.LoginAttemptRepository = (*loginAttemptRepositoryStub)(nil)
+
+func loginAttemptKey(email, ip string) string { return email + "|" + ip }
+
+func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, _ time.Time) (int, error) {
+	if r.countErr != nil {
+		return 0, r.countErr
+	}
+	return r.failures[loginAttemptKey(email, ip)], nil
+}
+
+func (r *loginAttemptRepositoryStub) RecordFailure(_ context.Context, email string, ip string) error {
+	if r.recordErr != nil {
+		return r.recordErr
+	}
+	r.failures[loginAttemptKey(email, ip)]++
+	return nil
+}
+
+func (r *loginAttemptRepositoryStub) ClearFailures(_ context.Context, email string, ip string) error {
+	r.clearCalls++
+	delete(r.failures, loginAttemptKey(email, ip))
+	return nil
+}
+
 type refreshTokenRecord struct {
 	userID    string
 	familyID  string
@@ -586,6 +622,129 @@ func TestAuthServiceLoginPropagatesRepositoryErrors(t *testing.T) {
 
 	if !errors.Is(err, repositoryErr) {
 		t.Fatalf("Login() error = %v, want repository error", err)
+	}
+}
+
+func TestAuthServiceLogin_BlocksAfterTooManyFailuresFromSameEmailAndIP(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts
+
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	// Contrasena CORRECTA: el bloqueo tiene que activarse antes de siquiera
+	// comparar el hash, no depender de que la contrasena este mal.
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "203.0.113.1",
+	})
+
+	if !errors.Is(err, ErrLoginAttemptsExceeded) {
+		t.Fatalf("Login() error = %v, want ErrLoginAttemptsExceeded", err)
+	}
+}
+
+func TestAuthServiceLogin_SameEmailDifferentIP_NotBlocked(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	// Un atacante agoto el limite para esta cuenta desde SU ip.
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts
+
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	// La dueña real, desde otra ip, no deberia quedar bloqueada.
+	result, err := service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "198.51.100.7",
+	})
+
+	if err != nil {
+		t.Fatalf("Login() from a different IP error = %v, want success", err)
+	}
+	if result == nil || result.Auth == nil {
+		t.Fatalf("Login() from a different IP must return a session: %+v", result)
+	}
+}
+
+func TestAuthServiceLogin_WrongPassword_RecordsFailure(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		Email:        "ada@example.com",
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "wrong-password",
+		IP:       "203.0.113.1",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() error = %v, want ErrInvalidCredentials", err)
+	}
+	if got := attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")]; got != 1 {
+		t.Errorf("recorded failures = %d, want 1", got)
+	}
+}
+
+func TestAuthServiceLogin_Success_ClearsFailures(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID:            "550e8400-e29b-41d4-a716-446655440000",
+		Email:         "ada@example.com",
+		PasswordHash:  sql.NullString{String: string(passwordHash), Valid: true},
+		EmailVerified: true,
+	}}
+	attempts := newLoginAttemptRepositoryStub()
+	attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")] = maxLoginAttempts - 1
+	service := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts))
+
+	_, err = service.Login(context.Background(), model.LoginRequest{
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		IP:       "203.0.113.1",
+	})
+
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if attempts.clearCalls != 1 {
+		t.Errorf("ClearFailures calls = %d, want 1", attempts.clearCalls)
+	}
+	if got := attempts.failures[loginAttemptKey("ada@example.com", "203.0.113.1")]; got != 0 {
+		t.Errorf("failures after success = %d, want 0", got)
 	}
 }
 

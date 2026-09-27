@@ -151,11 +151,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events, login_attempts RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, login_attempts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 
@@ -202,6 +202,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	authService := service.NewAuthService(userRepo, sessionRepo,
 		service.WithEmailConfirmation(confirmationService),
 		service.WithTwoFactor(twoFactorService),
+		service.WithLoginAttempts(repository.NewLoginAttemptRepository(db)),
 	)
 	authHandler := handler.NewAuthHandler(authService)
 	confirmationHandler := handler.NewEmailConfirmationHandler(confirmationService)

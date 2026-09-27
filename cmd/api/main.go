@@ -85,9 +85,11 @@ func main() {
 	twoFactorService := service.NewTwoFactorService(twoFactorRepo, userRepo, refreshRepo, twoFactorCipher)
 	twoFactorHandler := handler.NewTwoFactorHandler(twoFactorService)
 
+	loginAttemptRepo := repository.NewLoginAttemptRepository(dbConnection)
 	authService := service.NewAuthService(userRepo, refreshRepo,
 		service.WithEmailConfirmation(emailConfirmationService),
 		service.WithTwoFactor(twoFactorService),
+		service.WithLoginAttempts(loginAttemptRepo),
 	)
 	authHandler := handler.NewAuthHandler(authService)
 	profileImageStorage := newProfileImageStorage()
