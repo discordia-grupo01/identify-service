@@ -29,6 +29,7 @@ var (
 	ErrInvalidRefreshToken   = errors.New("token de actualización inválido o expirado")
 	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
+	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
 )
 
 const (
@@ -49,6 +50,10 @@ type AuthService interface {
 	Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Refresh(ctx context.Context, refreshToken string) (*model.AuthResponse, error)
+	// SetPassword le da una contraseña a una cuenta que nunca tuvo una (alta
+	// puramente federada por Google): sin esto, esa cuenta no puede activar
+	// 2FA, porque no tendria como reingresarla para desactivarlo despues.
+	SetPassword(ctx context.Context, userID string, password string) error
 }
 
 type EmailConfirmationRequester interface {
@@ -195,6 +200,29 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, err
 	}
 	return &model.LoginResult{Auth: auth}, nil
+}
+
+func (s *authService) SetPassword(ctx context.Context, userID string, password string) error {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if user.PasswordHash.Valid {
+		return ErrPasswordAlreadySet
+	}
+	if !validatePassword(password) {
+		return ErrPasswordInsecure
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
 }
 
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {

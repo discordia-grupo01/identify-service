@@ -20,6 +20,10 @@ type UserRepository interface {
 	// de un read-modify-write hecho en aplicación. Devuelve el usuario ya
 	// actualizado, o nil si userID no existe.
 	UpdateStatus(ctx context.Context, userID string, statusText *string, statusEmoji *string) (*model.User, error)
+	// UpdatePasswordHash setea la contraseña de una cuenta que nunca tuvo una
+	// (alta puramente federada por Google): a diferencia del reset de
+	// contraseña, no depende de un token por mail.
+	UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error
 }
 
 func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error {

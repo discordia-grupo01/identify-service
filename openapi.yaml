@@ -367,7 +367,9 @@ paths:
       description: Generates a TOTP secret and returns the otpauth:// URI for the
         front to render as a QR. 2FA stays off until a code is confirmed via
         /v1/me/2fa/activate. Calling this twice while pending reuses the same
-        secret instead of rotating it.
+        secret instead of rotating it. Requires the account to already have a
+        password (POST /v1/me/password first) -- otherwise there'd be no way to
+        re-enter it later to disable 2FA or regenerate recovery codes.
       responses:
         "200":
           description: OK
@@ -382,7 +384,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.ErrorResponse"
         "409":
-          description: 2FA is already enabled on this account
+          description: 2FA is already enabled on this account, or the account has no
+            password yet
           content:
             application/json:
               schema:
@@ -392,6 +395,45 @@ paths:
       summary: Start setting up two-factor authentication
       tags:
         - two-factor
+  /v1/me/password:
+    post:
+      description: "For an account that never had one (a purely federated Google
+        sign-up): lets it configure a password so it can later re-enter it to
+        disable two-factor or regenerate recovery codes. Rejected if the account
+        already has a password -- this is not a change-password endpoint."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.SetPasswordRequest"
+        description: New password
+        required: true
+      responses:
+        "204":
+          description: no content
+        "400":
+          description: missing password, or insecure password
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: the account already has a password
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Set the account's initial password
+      tags:
+        - auth
   /v1/me/profile:
     get:
       responses:
@@ -531,7 +573,9 @@ paths:
     post:
       description: "CA1: creates a new account if the email is new. CA2: links to an
         existing account by email. CA3: 503 if Google is unreachable, so the
-        client can offer email/password login instead."
+        client can offer email/password login instead. If the resolved account
+        has two-factor enabled, the login is accepted (202) but not completed,
+        no cookie is set, and it's finished via POST /v1/login/2fa."
       requestBody:
         content:
           application/json:
@@ -541,11 +585,17 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: "no two-factor on this account: session granted"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/model.AuthResponse"
+        "202":
+          description: "two-factor enabled: accepted, continue at POST /v1/login/2fa"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorChallengeResponse"
         "400":
           description: missing id_token
           content:
@@ -663,7 +713,9 @@ paths:
   /v1/pin/login:
     post:
       description: Alternative to email/password for a device that already configured
-        a PIN. After too many wrong PINs in a row, the device is temporarily
+        a PIN. If the account has two-factor enabled, the PIN alone is not
+        enough: the request is accepted (202) but not completed, no cookie is
+        set, and the login is finished via POST /v1/login/2fa." After too many wrong PINs in a row, the device is temporarily
         locked out of PIN login (423) and must fall back to POST /v1/login with
         email and password.
       requestBody:
@@ -675,11 +727,17 @@ paths:
         required: true
       responses:
         "200":
-          description: OK
+          description: "no two-factor on this account: session granted"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/model.AuthResponse"
+        "202":
+          description: "two-factor enabled: accepted, continue at POST /v1/login/2fa"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.TwoFactorChallengeResponse"
         "400":
           description: Bad Request
           content:
@@ -946,6 +1004,13 @@ components:
       required:
         - email
         - name
+        - password
+      type: object
+    model.SetPasswordRequest:
+      properties:
+        password:
+          type: string
+      required:
         - password
       type: object
     model.StatusUpdateRequest:

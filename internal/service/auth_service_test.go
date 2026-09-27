@@ -15,11 +15,14 @@ import (
 )
 
 type userRepositoryStub struct {
-	existingUser *model.User
-	getErr       error
-	createErr    error
-	updateErr    error
-	createdUser  *model.User
+	existingUser        *model.User
+	getErr              error
+	createErr           error
+	updateErr           error
+	createdUser         *model.User
+	updatePasswordErr   error
+	updatedPasswordHash string
+	updatedPasswordUser string
 }
 
 var _ repository.UserRepository = (*userRepositoryStub)(nil)
@@ -63,6 +66,18 @@ func (r *userRepositoryStub) UpdateProfile(_ context.Context, _ string, name str
 	r.existingUser.Name = name
 	r.existingUser.Description = description
 	r.existingUser.AvatarURL = avatarURL
+	return nil
+}
+
+func (r *userRepositoryStub) UpdatePasswordHash(_ context.Context, userID string, passwordHash string) error {
+	if r.updatePasswordErr != nil {
+		return r.updatePasswordErr
+	}
+	r.updatedPasswordUser = userID
+	r.updatedPasswordHash = passwordHash
+	if r.existingUser != nil {
+		r.existingUser.PasswordHash = sql.NullString{String: passwordHash, Valid: true}
+	}
 	return nil
 }
 
@@ -896,6 +911,71 @@ func TestAuthServiceRefreshRejectsWhenUserNoLongerExists(t *testing.T) {
 
 	if !errors.Is(err, ErrInvalidRefreshToken) {
 		t.Fatalf("Refresh() error = %v, want ErrInvalidRefreshToken", err)
+	}
+}
+
+func TestAuthServiceSetPasswordConfiguresAHashForAFederatedAccount(t *testing.T) {
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", Email: "ada@example.com"}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	if err := svc.SetPassword(context.Background(), user.ID, "Secure123"); err != nil {
+		t.Fatalf("SetPassword() error = %v", err)
+	}
+
+	if repo.updatedPasswordUser != user.ID {
+		t.Fatalf("UpdatePasswordHash() called for user %q, want %q", repo.updatedPasswordUser, user.ID)
+	}
+	if repo.updatedPasswordHash == "" || repo.updatedPasswordHash == "Secure123" {
+		t.Fatalf("password must be persisted as a bcrypt hash, never in plain text: %q", repo.updatedPasswordHash)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(repo.updatedPasswordHash), []byte("Secure123")) != nil {
+		t.Fatal("persisted hash does not match the password that was set")
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsAccountsThatAlreadyHaveOne(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Existing123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	user := &model.User{
+		ID:           "550e8400-e29b-41d4-a716-446655440000",
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true},
+	}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	err = svc.SetPassword(context.Background(), user.ID, "Secure123")
+
+	if !errors.Is(err, ErrPasswordAlreadySet) {
+		t.Fatalf("SetPassword() error = %v, want ErrPasswordAlreadySet", err)
+	}
+	if repo.updatedPasswordHash != "" {
+		t.Fatal("must not overwrite an existing password hash")
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsInsecurePasswords(t *testing.T) {
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000"}
+	repo := &userRepositoryStub{existingUser: user}
+	svc := NewAuthService(repo, nil)
+
+	err := svc.SetPassword(context.Background(), user.ID, "weak")
+
+	if !errors.Is(err, ErrPasswordInsecure) {
+		t.Fatalf("SetPassword() error = %v, want ErrPasswordInsecure", err)
+	}
+}
+
+func TestAuthServiceSetPasswordRejectsUnknownUser(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: nil}
+	svc := NewAuthService(repo, nil)
+
+	err := svc.SetPassword(context.Background(), "550e8400-e29b-41d4-a716-446655440099", "Secure123")
+
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("SetPassword() error = %v, want ErrUserNotFound", err)
 	}
 }
 

@@ -161,6 +161,13 @@ func TestTwoFactorHandlerSetupReportsAnAlreadyActiveAccount(t *testing.T) {
 	assertAPIError(t, recorder, http.StatusConflict, "TWO_FACTOR_ALREADY_ENABLED")
 }
 
+func TestTwoFactorHandlerSetupRejectsAnAccountWithoutAPassword(t *testing.T) {
+	recorder := performTwoFactorRequest(t, &twoFactorServiceStub{err: service.ErrPasswordRequiredForTwoFactor},
+		http.MethodPost, "/v1/me/2fa/setup", "")
+
+	assertAPIError(t, recorder, http.StatusConflict, "PASSWORD_REQUIRED_FOR_TWO_FACTOR")
+}
+
 func TestTwoFactorHandlerSetupReturnsTheOtpauthURL(t *testing.T) {
 	serviceStub := &twoFactorServiceStub{setup: &model.TwoFactorSetupResponse{
 		Secret:     "JBSWY3DPEHPK3PXP",
