@@ -265,6 +265,28 @@ func TestTwoFactorSetupDoesNotActivateOnItsOwn(t *testing.T) {
 	}
 }
 
+// Una cuenta puramente federada (alta por Google, sin contraseña) no puede
+// activar 2FA: no tendria como reingresar una contraseña despues para
+// desactivarlo o regenerar los codigos de recuperacion.
+func TestTwoFactorSetupRejectsAnAccountWithoutAPassword(t *testing.T) {
+	fixture := newTwoFactorFixture(t)
+	fixture.userRepo.existingUser.PasswordHash = sql.NullString{}
+
+	_, err := fixture.service.StartSetup(context.Background(), testUserID)
+
+	if !errors.Is(err, ErrPasswordRequiredForTwoFactor) {
+		t.Fatalf("StartSetup() error = %v, want ErrPasswordRequiredForTwoFactor", err)
+	}
+
+	status, statusErr := fixture.service.Status(context.Background(), testUserID)
+	if statusErr != nil {
+		t.Fatalf("Status() error = %v", statusErr)
+	}
+	if status.Enabled || status.PendingActivation {
+		t.Fatalf("Status() = %+v, want no setup to have started", status)
+	}
+}
+
 // El secreto no se guarda en claro: quien lea la tabla no puede generar
 // codigos sin la clave de cifrado.
 func TestTwoFactorSetupStoresTheSecretEncrypted(t *testing.T) {

@@ -37,25 +37,31 @@ func (h *TwoFactorHandler) Status(c *gin.Context) {
 }
 
 // @Summary      Start setting up two-factor authentication
-// @Description  Generates a TOTP secret and returns the otpauth:// URI for the front to render as a QR. 2FA stays off until a code is confirmed via /v1/me/2fa/activate. Calling this twice while pending reuses the same secret instead of rotating it.
+// @Description  Generates a TOTP secret and returns the otpauth:// URI for the front to render as a QR. 2FA stays off until a code is confirmed via /v1/me/2fa/activate. Calling this twice while pending reuses the same secret instead of rotating it. Requires the account to already have a password (POST /v1/me/password first) -- otherwise there'd be no way to re-enter it later to disable 2FA or regenerate recovery codes.
 // @Tags         two-factor
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  model.TwoFactorSetupResponse
 // @Failure      401  {object}  model.ErrorResponse
-// @Failure      409  {object}  model.ErrorResponse  "2FA is already enabled on this account"
+// @Failure      409  {object}  model.ErrorResponse  "2FA is already enabled on this account, or the account has no password yet"
 // @Router       /v1/me/2fa/setup [post]
 func (h *TwoFactorHandler) Setup(c *gin.Context) {
 	res, err := h.service.StartSetup(c.Request.Context(), c.GetString(middleware.UserIDKey))
 	if err != nil {
-		if errors.Is(err, service.ErrTwoFactorAlreadyEnabled) {
+		switch {
+		case errors.Is(err, service.ErrTwoFactorAlreadyEnabled):
 			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
 				Code:    "TWO_FACTOR_ALREADY_ENABLED",
 				Message: "El segundo factor ya está activo en esta cuenta",
 			}})
-			return
+		case errors.Is(err, service.ErrPasswordRequiredForTwoFactor):
+			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
+				Code:    "PASSWORD_REQUIRED_FOR_TWO_FACTOR",
+				Message: err.Error(),
+			}})
+		default:
+			respondInternalError(c)
 		}
-		respondInternalError(c)
 		return
 	}
 	c.JSON(http.StatusOK, res)

@@ -28,12 +28,13 @@ type googleLoginRequest struct {
 // email/contrasena como alternativa).
 // LoginWithGoogle godoc
 // @Summary      Log in / sign up with Google
-// @Description  CA1: creates a new account if the email is new. CA2: links to an existing account by email. CA3: 503 if Google is unreachable, so the client can offer email/password login instead.
+// @Description  CA1: creates a new account if the email is new. CA2: links to an existing account by email. CA3: 503 if Google is unreachable, so the client can offer email/password login instead. If the resolved account has two-factor enabled, the login is accepted (202) but not completed, no cookie is set, and it's finished via POST /v1/login/2fa.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
 // @Param        body  body  googleLoginRequest  true  "Google ID token"
-// @Success      200  {object}  model.AuthResponse
+// @Success      200  {object}  model.AuthResponse  "no two-factor on this account: session granted"
+// @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse  "missing id_token"
 // @Failure      401  {object}  model.ErrorResponse  "token could not be validated"
 // @Failure      503  {object}  model.ErrorResponse  "Google unreachable"
@@ -82,7 +83,12 @@ func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {
 		return
 	}
 
-	setRefreshCookie(c, res.RefreshToken)
-	res.RefreshToken = ""
-	c.JSON(http.StatusOK, res)
+	if res.Challenge != nil {
+		c.JSON(http.StatusAccepted, res.Challenge)
+		return
+	}
+
+	setRefreshCookie(c, res.Auth.RefreshToken)
+	res.Auth.RefreshToken = ""
+	c.JSON(http.StatusOK, res.Auth)
 }

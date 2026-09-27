@@ -105,13 +105,13 @@ func TestPinServiceLoginWithPinAllowsVerifiedUser(t *testing.T) {
 		t.Fatalf("ConfigurePin() error = %v", err)
 	}
 
-	response, err := svc.LoginWithPin(context.Background(), "device-1", "654321")
+	result, err := svc.LoginWithPin(context.Background(), "device-1", "654321")
 
 	if err != nil {
 		t.Fatalf("LoginWithPin() error = %v", err)
 	}
-	if response == nil || response.Token == "" || response.RefreshToken == "" {
-		t.Fatalf("unexpected response: %+v", response)
+	if result == nil || result.Auth == nil || result.Auth.Token == "" || result.Auth.RefreshToken == "" {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }
 
@@ -153,5 +153,58 @@ func TestPinServiceLoginWithPinRejectsAWrongPin(t *testing.T) {
 
 	if !errors.Is(err, ErrPinIncorrect) {
 		t.Fatalf("LoginWithPin() error = %v, want ErrPinIncorrect", err)
+	}
+}
+
+func TestPinServiceLoginWithPinReturnsChallengeWhenAccountHasTwoFactor(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	pinRepo := newDevicePinRepositoryStub()
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", EmailVerified: true}
+	userRepo := &userRepositoryStub{existingUser: user}
+	refreshRepo := newRefreshTokenRepositoryStub()
+	challenger := &twoFactorChallengerStub{enabledUserIDs: map[string]bool{user.ID: true}}
+	svc := NewPinService(pinRepo, userRepo, refreshRepo, WithPinTwoFactor(challenger))
+
+	if err := svc.ConfigurePin(context.Background(), user.ID, "device-1", "654321"); err != nil {
+		t.Fatalf("ConfigurePin() error = %v", err)
+	}
+
+	result, err := svc.LoginWithPin(context.Background(), "device-1", "654321")
+
+	if err != nil {
+		t.Fatalf("LoginWithPin() error = %v", err)
+	}
+	if result.Auth != nil {
+		t.Fatalf("expected no session to be granted before the second factor, got %+v", result.Auth)
+	}
+	if result.Challenge == nil || !result.Challenge.TwoFactorRequired {
+		t.Fatalf("expected a two-factor challenge, got %+v", result)
+	}
+	if challenger.startedForUser != user.ID {
+		t.Fatalf("StartChallenge() called for user %q, want %q (2FA must not be skippable via the device PIN)", challenger.startedForUser, user.ID)
+	}
+	if len(refreshRepo.tokens) != 0 {
+		t.Fatal("no refresh token should be issued while the second factor is pending")
+	}
+}
+
+func TestPinServiceLoginWithPinSkipsChallengeWhenTwoFactorDisabled(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	pinRepo := newDevicePinRepositoryStub()
+	user := &model.User{ID: "550e8400-e29b-41d4-a716-446655440000", EmailVerified: true}
+	userRepo := &userRepositoryStub{existingUser: user}
+	svc := NewPinService(pinRepo, userRepo, newRefreshTokenRepositoryStub(), WithPinTwoFactor(&twoFactorChallengerStub{}))
+
+	if err := svc.ConfigurePin(context.Background(), user.ID, "device-1", "654321"); err != nil {
+		t.Fatalf("ConfigurePin() error = %v", err)
+	}
+
+	result, err := svc.LoginWithPin(context.Background(), "device-1", "654321")
+
+	if err != nil {
+		t.Fatalf("LoginWithPin() error = %v", err)
+	}
+	if result.Challenge != nil || result.Auth == nil || result.Auth.Token == "" {
+		t.Fatalf("expected a normal session without 2FA, got %+v", result)
 	}
 }

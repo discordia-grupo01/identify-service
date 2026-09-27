@@ -22,21 +22,36 @@ var pinFormat = regexp.MustCompile(`^\d{6,8}$`)
 
 type PinService interface {
 	ConfigurePin(ctx context.Context, userID string, deviceID string, pin string) error
-	LoginWithPin(ctx context.Context, deviceID string, pin string) (*model.AuthResponse, error)
+	LoginWithPin(ctx context.Context, deviceID string, pin string) (*model.LoginResult, error)
 }
 
 type pinService struct {
 	pinRepo     repository.DevicePinRepository
 	userRepo    repository.UserRepository
 	refreshRepo repository.RefreshTokenRepository
+	twoFactor   TwoFactorChallenger
+}
+
+// PinOption configura dependencias opcionales de pinService, igual que
+// AuthOption en authService: sin TwoFactorChallenger el login con PIN nunca
+// pide segundo factor.
+type PinOption func(*pinService)
+
+func WithPinTwoFactor(challenger TwoFactorChallenger) PinOption {
+	return func(s *pinService) { s.twoFactor = challenger }
 }
 
 func NewPinService(
 	pinRepo repository.DevicePinRepository,
 	userRepo repository.UserRepository,
 	refreshRepo repository.RefreshTokenRepository,
+	opts ...PinOption,
 ) PinService {
-	return &pinService{pinRepo: pinRepo, userRepo: userRepo, refreshRepo: refreshRepo}
+	s := &pinService{pinRepo: pinRepo, userRepo: userRepo, refreshRepo: refreshRepo}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *pinService) ConfigurePin(ctx context.Context, userID string, deviceID string, pin string) error {
@@ -57,7 +72,7 @@ func (s *pinService) ConfigurePin(ctx context.Context, userID string, deviceID s
 	})
 }
 
-func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin string) (*model.AuthResponse, error) {
+func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin string) (*model.LoginResult, error) {
 	if !pinFormat.MatchString(pin) {
 		return nil, ErrPinInvalidFormat
 	}
@@ -84,5 +99,26 @@ func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin stri
 		return nil, ErrEmailNotVerified
 	}
 
-	return issueTokenPair(ctx, s.refreshRepo, user, uuid.NewString())
+	// El PIN es un atajo del login de esta cuenta en este dispositivo, no una
+	// forma alternativa de esquivar el segundo factor: si la cuenta tiene 2FA
+	// activo, lo pide igual que el login con email/contrasena.
+	if s.twoFactor != nil {
+		enabled, err := s.twoFactor.IsEnabled(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if enabled {
+			challenge, err := s.twoFactor.StartChallenge(ctx, user.ID)
+			if err != nil {
+				return nil, err
+			}
+			return &model.LoginResult{Challenge: challenge}, nil
+		}
+	}
+
+	auth, err := issueTokenPair(ctx, s.refreshRepo, user, uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	return &model.LoginResult{Auth: auth}, nil
 }
