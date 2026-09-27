@@ -60,11 +60,7 @@ func main() {
 	emailConfirmationRepo := repository.NewPostgresEmailConfirmationRepository(dbConnection)
 	oauthIdentityRepo := repository.NewOAuthIdentityRepository(dbConnection)
 	googleVerifier := googleoauth.NewVerifier(getEnv("GOOGLE_CLIENT_ID", ""))
-	oauthService := service.NewOAuthService(userRepo, oauthIdentityRepo, refreshRepo, googleVerifier)
-	oauthHandler := handler.NewOAuthHandler(oauthService)
 	devicePinRepo := repository.NewDevicePinRepository(dbConnection)
-	pinService := service.NewPinService(devicePinRepo, userRepo, refreshRepo)
-	pinHandler := handler.NewPinHandler(pinService)
 	emailConfig, err := emailutil.ConfigFromEnv()
 	if err != nil {
 		log.Fatalf("invalid email configuration: %v", err)
@@ -84,6 +80,14 @@ func main() {
 	twoFactorRepo := repository.NewTwoFactorRepository(dbConnection)
 	twoFactorService := service.NewTwoFactorService(twoFactorRepo, userRepo, refreshRepo, twoFactorCipher)
 	twoFactorHandler := handler.NewTwoFactorHandler(twoFactorService)
+	oauthService := service.NewOAuthService(userRepo, oauthIdentityRepo, refreshRepo, googleVerifier,
+		service.WithOAuthTwoFactor(twoFactorService),
+	)
+	oauthHandler := handler.NewOAuthHandler(oauthService)
+	pinService := service.NewPinService(devicePinRepo, userRepo, refreshRepo,
+		service.WithPinTwoFactor(twoFactorService),
+	)
+	pinHandler := handler.NewPinHandler(pinService)
 
 	authService := service.NewAuthService(userRepo, refreshRepo,
 		service.WithEmailConfirmation(emailConfirmationService),
@@ -133,6 +137,7 @@ func main() {
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 		api.POST("/email-confirmation", emailConfirmationHandler.Request)
 		api.POST("/email-confirmation/confirm", emailConfirmationHandler.Confirm)
+		api.POST("/me/password", middleware.RequireAuth(), authHandler.SetPassword)
 		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
 		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
 		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)

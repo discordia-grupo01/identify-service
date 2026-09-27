@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 
@@ -98,6 +99,70 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, res)
+}
+
+// SetPassword godoc
+// @Summary      Set the account's initial password
+// @Description  For an account that never had one (a purely federated Google sign-up): lets it configure a password so it can later re-enter it to disable two-factor or regenerate recovery codes. Rejected if the account already has a password -- this is not a change-password endpoint.
+// @Tags         auth
+// @Accept       json
+// @Security     BearerAuth
+// @Param        body  body  model.SetPasswordRequest  true  "New password"
+// @Success      204  "no content"
+// @Failure      400  {object}  model.ErrorResponse  "missing password, or insecure password"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      409  {object}  model.ErrorResponse  "the account already has a password"
+// @Router       /v1/me/password [post]
+func (h *AuthHandler) SetPassword(c *gin.Context) {
+	var req model.SetPasswordRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{
+			Error: model.APIError{
+				Code:    "INVALID_INPUT",
+				Message: "Falta la contraseña",
+				Details: map[string]any{"reason": err.Error()},
+			},
+		})
+		return
+	}
+
+	userID := c.GetString(middleware.UserIDKey)
+
+	if err := h.service.SetPassword(c.Request.Context(), userID, req.Password); err != nil {
+		switch {
+		case errors.Is(err, service.ErrPasswordInsecure):
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "INSECURE_PASSWORD",
+					Message: err.Error(),
+					Details: map[string]any{
+						"min_length":         8,
+						"requires_uppercase": true,
+						"requires_lowercase": true,
+						"requires_number":    true,
+					},
+				},
+			})
+		case errors.Is(err, service.ErrPasswordAlreadySet):
+			c.JSON(http.StatusConflict, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "PASSWORD_ALREADY_SET",
+					Message: err.Error(),
+				},
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "INTERNAL_SERVER_ERROR",
+					Message: "Ha ocurrido un error inesperado en el servidor",
+				},
+			})
+		}
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // Login godoc
