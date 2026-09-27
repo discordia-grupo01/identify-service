@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
@@ -187,5 +188,27 @@ func TestPinHandlerLoginMapsEmailNotVerifiedToForbidden(t *testing.T) {
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "EMAIL_NOT_VERIFIED" {
 		t.Fatalf("error code = %q, want EMAIL_NOT_VERIFIED", response.Error.Code)
+	}
+}
+
+func TestPinHandlerLoginMapsPinLockedTo423WithFallbackAndRetryAfter(t *testing.T) {
+	serviceStub := &pinServiceStub{loginErr: &service.PinLockedError{RetryAfter: 12 * time.Minute}}
+
+	recorder := performPinLoginRequest(t, serviceStub, `{"pin":"000000","device_id":"device-1"}`)
+
+	if recorder.Code != http.StatusLocked {
+		t.Fatalf("status = %d, want %d (CA3: bloqueo temporal)", recorder.Code, http.StatusLocked)
+	}
+	var response model.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "PIN_LOCKED" {
+		t.Fatalf("error code = %q, want PIN_LOCKED", response.Error.Code)
+	}
+	if response.Error.Details["fallback"] != "email_password" {
+		t.Fatalf("details.fallback = %v, want %q (CA3: debe solicitar autenticación con email y contraseña)", response.Error.Details["fallback"], "email_password")
+	}
+	retryAfter, ok := response.Error.Details["retry_after_seconds"].(float64)
+	if !ok || retryAfter <= 0 {
+		t.Fatalf("details.retry_after_seconds = %v, want a positive number", response.Error.Details["retry_after_seconds"])
 	}
 }

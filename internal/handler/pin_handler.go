@@ -71,7 +71,7 @@ func (h *PinHandler) Configure(c *gin.Context) {
 
 // Login godoc
 // @Summary      Log in with a device PIN
-// @Description  Alternative to email/password for a device that already configured a PIN.
+// @Description  Alternative to email/password for a device that already configured a PIN. After too many wrong PINs in a row, the device is temporarily locked out of PIN login (423) and must fall back to POST /v1/login with email and password.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -80,6 +80,7 @@ func (h *PinHandler) Configure(c *gin.Context) {
 // @Failure      400  {object}  model.ErrorResponse
 // @Failure      401  {object}  model.ErrorResponse  "PIN not configured, incorrect, or malformed"
 // @Failure      403  {object}  model.ErrorResponse  "email not verified yet"
+// @Failure      423  {object}  model.ErrorResponse  "too many failed PIN attempts: temporarily locked, fall back to email+password"
 // @Router       /v1/pin/login [post]
 func (h *PinHandler) Login(c *gin.Context) {
 	var req model.PinLoginRequest
@@ -103,6 +104,21 @@ func (h *PinHandler) Login(c *gin.Context) {
 				Code:    "EMAIL_NOT_VERIFIED",
 				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
 			}})
+		case errors.Is(err, service.ErrPinLocked):
+			details := map[string]any{
+				"fallback": "email_password",
+			}
+			var lockedErr *service.PinLockedError
+			if errors.As(err, &lockedErr) {
+				details["retry_after_seconds"] = int(lockedErr.RetryAfter.Seconds())
+			}
+			c.JSON(http.StatusLocked, model.ErrorResponse{
+				Error: model.APIError{
+					Code:    "PIN_LOCKED",
+					Message: "Demasiados intentos fallidos. El acceso por PIN quedó bloqueado temporalmente: iniciá sesión con tu email y contraseña.",
+					Details: details,
+				},
+			})
 		case errors.Is(err, service.ErrPinNotConfigured), errors.Is(err, service.ErrPinIncorrect), errors.Is(err, service.ErrPinInvalidFormat):
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
 				Error: model.APIError{
