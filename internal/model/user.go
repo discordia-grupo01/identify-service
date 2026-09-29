@@ -16,8 +16,11 @@ type User struct {
 	EmailVerified bool           `json:"email_verified"`
 	VerifiedAt    *time.Time     `json:"verified_at,omitempty"`
 	PasswordHash  sql.NullString `json:"-"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// ProfileVersion sube con cada cambio del perfil público y ordena los
+	// users.profile_updated de este usuario.
+	ProfileVersion int64     `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type RegisterRequest struct {
