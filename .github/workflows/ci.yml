@@ -110,12 +110,51 @@ jobs:
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
 
+  # Aplica las migraciones pendientes contra la base de produccion con
+  # `make migrate` (golang-migrate: segun la tabla schema_migrations, solo corre
+  # las que todavia no se aplicaron). Va despues de publicar la imagen y antes
+  # del deploy: el codigo nuevo arranca con el schema ya actualizado, y si una
+  # migracion falla no se despliega.
+  migrate:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: migrate-identify
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar migraciones en produccion
+        env:
+          DATABASE_HOST: ${{ secrets.PROD_DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.PROD_DATABASE_PORT }}
+          DATABASE_NAME: ${{ secrets.PROD_DATABASE_NAME }}
+          DATABASE_USER: ${{ secrets.PROD_DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
+          DATABASE_SSLMODE: ${{ secrets.PROD_DATABASE_SSLMODE }}
+          DATABASE_SCHEMA: ${{ secrets.PROD_DATABASE_SCHEMA }}
+        run: |
+          if [ -z "$DATABASE_HOST" ] || [ -z "$DATABASE_PASSWORD" ]; then
+            echo "Faltan los secrets PROD_DATABASE_* (ver README, seccion Migraciones en el deploy)" >&2
+            exit 1
+          fi
+          # La password va dentro de la URL de conexion que arma `make migrate`:
+          # se codifica por si tiene caracteres especiales (@, :, /, #...) y se
+          # enmascara, porque codificada ya no coincide con el secret y GitHub no
+          # la ocultaria. `make -s` para que make no imprima el comando (con la URL).
+          ENCODED=$(jq -rn --arg p "$DATABASE_PASSWORD" '$p|@uri')
+          echo "::add-mask::$ENCODED"
+          DATABASE_PASSWORD="$ENCODED" make -s migrate
+
+  # Espera a `migrate`: no se despliega sin el schema al dia.
   # Despliega la imagen del commit en discordia-vm. Entra por SSH a traves de un
   # tunel IAP (el puerto 22 no hace falta abrirlo a internet). La clave SSH solo
   # puede ejecutar ~/deploy.sh en la VM (ver deploy/deploy.sh), que valida el tag,
   # recrea el contenedor, hace smoke test de /readyz y vuelve atras si falla.
   deploy:
-    needs: publish
+    needs: [publish, migrate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:

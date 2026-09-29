@@ -151,11 +151,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("db.Ping() error = %v (¿corriste `make migrate`?)", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events, login_attempts RESTART IDENTITY CASCADE`)
+		_, _ = db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, consumed_events, login_attempts, outbox_events RESTART IDENTITY CASCADE`)
 		_ = db.Close()
 	})
 
-	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, login_attempts RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := db.Exec(`TRUNCATE TABLE refresh_tokens, users, server_memberships, login_attempts, outbox_events RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
 	}
 

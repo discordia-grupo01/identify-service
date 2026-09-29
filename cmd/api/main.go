@@ -13,6 +13,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
+	"github.com/discordia-grupo01/identify-service/internal/outbox"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
@@ -104,15 +105,21 @@ func main() {
 		router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
 	}
 
-	// El consumer de RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un
-	// entorno sin la dependencia levantada) el resto del servicio sigue
-	// funcionando normalmente, solo sin "servidores en común" actualizados.
+	// RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un entorno sin la
+	// dependencia levantada) el resto del servicio sigue funcionando
+	// normalmente, solo sin "servidores en común" actualizados y con los
+	// eventos de perfil esperando en la outbox.
 	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
 		consumer := events.NewConsumer(rabbitMQURL, membershipHandler, audit.NewRecorder(dbConnection))
 		go consumer.Start(context.Background())
+		// El poller publica los users.profile_updated que dejan en la outbox
+		// el registro, el alta por Google y los cambios de perfil y estado.
+		go outbox.NewPoller(dbConnection, events.NewAMQPPublisher(rabbitMQURL)).Start(context.Background())
 	} else {
-		log.Println("RABBITMQ_URL no configurada: el consumer de membership no se inicia")
+		// Sin RabbitMQ los eventos quedan pendientes en outbox_events y se
+		// publican cuando el servicio arranque con RABBITMQ_URL.
+		log.Println("RABBITMQ_URL no configurada: no se inician el consumer de membership ni el publisher de eventos")
 	}
 
 	router.GET("/livez", livez)
