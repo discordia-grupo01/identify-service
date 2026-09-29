@@ -135,6 +135,29 @@ Cada servicio de Discordia tiene su **propio proyecto de Supabase** (no comparte
    ```
 3. Correr `make migrate` y despues `make run`. Confirmar con `GET /readyz` (200). Un `POST /v1/users` envia un email de confirmacion; el login devuelve 401 hasta confirmar el token recibido mediante `POST /v1/email-confirmation/confirm`.
 
+### Migraciones en el deploy
+En cada push a `main`, el CI corre `make migrate` contra la base de
+produccion (job `migrate`, despues de publicar la imagen y **antes** de
+cambiarla en la VM). Si una migracion falla, no se despliega. Necesita estos
+secrets del repo (Settings > Secrets and variables > Actions), con los mismos
+valores que `DATABASE_*` en `~/identity.env` de la VM: `PROD_DATABASE_HOST`,
+`PROD_DATABASE_PORT`, `PROD_DATABASE_NAME`, `PROD_DATABASE_USER`,
+`PROD_DATABASE_PASSWORD` y `PROD_DATABASE_SSLMODE`. `PROD_DATABASE_SCHEMA`
+solo si `identity.env` tiene `DATABASE_SCHEMA` (hoy no: las tablas estan en
+`public`); si se setea sin que exista ese schema, `migrate` falla con
+`no schema`.
+
+Como la migracion se aplica antes del deploy, si despues el smoke test falla y
+`deploy.sh` vuelve a la imagen anterior, esa imagen corre contra el schema
+nuevo. Por eso las migraciones tienen que ser compatibles con la version
+anterior del codigo: agregar columnas nullable o con default, y no renombrar ni
+borrar nada en el mismo deploy en que se deja de usar.
+
+Si una migracion falla a mitad de camino, golang-migrate deja la version
+marcada como `dirty` y no aplica nada mas hasta resolverlo a mano: revisar que
+dejo aplicado, y despues `migrate force <ultima version buena>` para que el
+proximo `make migrate` la vuelva a intentar.
+
 ## Endpoints
 - `POST /v1/users` - registro de usuario.
 - `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body. **Si la cuenta tiene segundo factor activo, responde 202 (Accepted) en vez de 200**: trae `two_factor_required: true` + `challenge_token` y no setea cookie. El cliente sigue distinguiendo las dos respuestas por el campo `two_factor_required` (no por el código HTTP): el 202 solo existe para que la documentación de la API sea correcta. **429 (`LOGIN_ATTEMPTS_EXCEEDED`)** si hubo 5 intentos fallidos en los ultimos 15 minutos para esa combinacion de email + IP de origen -- se cuenta por (email, ip) y no por cuenta entera, para que nadie pueda bloquear la cuenta de otra persona solo sabiendo su email (ver `AuthService.Login` / `login_attempts`). Ademas, el gateway (Kong) limita `/v1/login` a 60 req/min por IP como proteccion adicional contra volumen.
