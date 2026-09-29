@@ -30,7 +30,7 @@ make run
 | DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
-| RABBITMQ_URL | - | URL de conexion a RabbitMQ. |
+| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan el consumer de membresias ni el publisher de eventos: los `users.profile_updated` quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
 | SMTP_USERNAME | - | Usuario SMTP. |
@@ -68,7 +68,8 @@ identify-service/
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
-│   ├── events/                 consumer de RabbitMQ: membresias de servidor para "servidores en comun" (HU 36)
+│   ├── events/                 consumer de RabbitMQ (membresias de servidor, HU 36) y publisher (exchange discordia.events)
+│   ├── outbox/                 outbox transaccional: Insert (misma tx que la escritura) + Poller que publica
 │   └── audit/                  registra cada evento recibido (tabla consumed_events), procesado o descartado
 ├── migrations/                migraciones de BDD (golang-migrate)
 ├── .github/
@@ -183,7 +184,31 @@ PROFILE_IMAGE_BUCKET=profile-images
 La clave `service_role` tiene privilegios elevados: guardarla solo como secreto del entorno del servicio. `PROFILE_IMAGE_PUBLIC_URL` solo es necesario si las imagenes se sirven mediante un dominio CDN o proxy propio.
 
 ## Eventos que publica
-Todavia no publica eventos (no hay integracion con RabbitMQ implementada).
+- `users.profile_updated` (exchange `discordia.events`) - foto completa del perfil
+  publico (`user_id`, `version`, `name`, `avatar_url`, `description`,
+  `status_text`, `status_emoji`; nunca el email). Se publica al crear un usuario
+  (registro con email o alta por Google) y en cada `PATCH /v1/me/profile`,
+  `PUT /v1/me/status` y `DELETE /v1/me/status`. Lo consume `discordia-servers`
+  para devolver el perfil de cada miembro en `GET /v1/servers/{id}/members`.
+  - `version` es la columna `users.profile_version`: empieza en 1 y cada cambio
+    la sube en el mismo `UPDATE`, asi que ordena las fotos de un usuario aunque
+    lleguen repetidas o en desorden (el consumidor solo aplica una mayor).
+  - **Outbox transaccional**: el repositorio escribe el usuario y la fila en
+    `outbox_events` en la misma transaccion (`internal/repository/user_repository.go`).
+    Si falla el insert en la outbox, falla la escritura entera. Un poller
+    (`internal/outbox`, cada 2 s, lotes de 20, `FOR UPDATE SKIP LOCKED`) publica
+    y marca `published_at`; si RabbitMQ falla, suma `attempts`, guarda
+    `last_error` y reintenta en el proximo tick.
+  - Verificar la confirmacion de email o setear contraseña no cambian el perfil
+    publico: no suben `profile_version` ni publican.
+  - **Backfill**: la migracion `000015_backfill_profile_events` deja un evento
+    por cada usuario existente con su version actual. Reaplicarlo es seguro. Si
+    hubo que relanzarlo (por ejemplo, porque se publico antes de que existiera
+    la cola de `discordia-servers` y RabbitMQ descarto los mensajes), correr a
+    mano el `INSERT ... SELECT` de ese archivo contra la base.
+  - Deploy: `discordia-servers` va primero (declara la cola
+    `servers.user_profiles`), despues se aplican las migraciones de este
+    servicio con `make migrate` y se despliega. Suma una conexion a RabbitMQ.
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
