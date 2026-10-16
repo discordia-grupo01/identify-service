@@ -192,6 +192,8 @@ func (h *TwoFactorHandler) VerifyLogin(c *gin.Context) {
 	res, err := h.service.VerifyLogin(c.Request.Context(), req)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrAccountSuspended):
+			respondAccountSuspended(c)
 		case errors.Is(err, service.ErrTwoFactorCodeInvalid):
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
 				Code:    "INVALID_TWO_FACTOR_CODE",

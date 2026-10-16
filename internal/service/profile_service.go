@@ -71,7 +71,9 @@ func (s *profileService) GetPublicProfile(ctx context.Context, viewerUserID stri
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
+	// Un suspendido desaparece del perfil público: se responde igual que si
+	// no existiera, para no revelar el estado de la cuenta a terceros.
+	if user == nil || user.SuspendedAt != nil {
 		return nil, ErrUserNotFound
 	}
 	response := model.NewPublicUserResponse(user)

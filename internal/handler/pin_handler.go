@@ -105,6 +105,8 @@ func (h *PinHandler) Login(c *gin.Context) {
 				Code:    "EMAIL_NOT_VERIFIED",
 				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
 			}})
+		case errors.Is(err, service.ErrAccountSuspended):
+			respondAccountSuspended(c)
 		case errors.Is(err, service.ErrPinLocked):
 			details := map[string]any{
 				"fallback": "email_password",

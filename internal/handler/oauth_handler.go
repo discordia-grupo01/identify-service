@@ -56,6 +56,9 @@ func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {
 	res, err := h.service.LoginWithGoogle(c.Request.Context(), req.IDToken)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrAccountSuspended):
+			respondAccountSuspended(c)
+
 		case errors.Is(err, service.ErrOAuthProviderUnavailable):
 			c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{
 				Error: model.APIError{

@@ -202,6 +202,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
 			}})
 			return
+		case errors.Is(err, service.ErrAccountSuspended):
+			respondAccountSuspended(c)
+			return
 		case errors.Is(err, service.ErrInvalidCredentials):
 			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
 				Error: model.APIError{
@@ -296,6 +299,9 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	res, err := h.service.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrAccountSuspended):
+			clearRefreshCookie(c)
+			respondAccountSuspended(c)
 		case errors.Is(err, service.ErrInvalidRefreshToken), errors.Is(err, service.ErrRefreshReused):
 			clearRefreshCookie(c)
 			respondSessionExpired(c)
@@ -323,6 +329,17 @@ func setRefreshCookie(c *gin.Context, refreshToken string) {
 func clearRefreshCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie(refreshCookieName, "", -1, refreshCookiePath, "", true, true)
+}
+
+// respondAccountSuspended: 403 ACCOUNT_SUSPENDED, el mismo cuerpo que da
+// RequireAuth para un access token vigente de una cuenta suspendida.
+func respondAccountSuspended(c *gin.Context) {
+	c.JSON(http.StatusForbidden, model.ErrorResponse{
+		Error: model.APIError{
+			Code:    "ACCOUNT_SUSPENDED",
+			Message: "Tu cuenta está suspendida",
+		},
+	})
 }
 
 func respondSessionExpired(c *gin.Context) {

@@ -81,6 +81,10 @@ func (s *oauthService) LoginWithGoogle(ctx context.Context, idToken string) (*mo
 		return nil, err
 	}
 
+	if user.SuspendedAt != nil {
+		return nil, ErrAccountSuspended
+	}
+
 	if s.twoFactor != nil {
 		enabled, err := s.twoFactor.IsEnabled(ctx, user.ID)
 		if err != nil {
