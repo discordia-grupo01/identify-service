@@ -110,16 +110,25 @@ func main() {
 	// normalmente, solo sin "servidores en común" actualizados y con los
 	// eventos de perfil esperando en la outbox.
 	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
+		// Sin el secreto no hay forma de verificar los admin.user_suspended /
+		// admin.user_reactivated, y aceptarlos sin firma dejaría a cualquiera
+		// con credenciales del broker suspender cuentas: no se arranca.
+		adminSecret := getEnv("ADMIN_EVENTS_HMAC_SECRET", "")
+		if adminSecret == "" {
+			log.Fatal("ADMIN_EVENTS_HMAC_SECRET es obligatoria cuando RABBITMQ_URL está configurada: sin ella no se puede verificar la firma de los eventos de admin")
+		}
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
 		consumer := events.NewConsumer(rabbitMQURL, membershipHandler, audit.NewRecorder(dbConnection))
 		go consumer.Start(context.Background())
+		adminConsumer := events.NewAdminConsumer(rabbitMQURL, adminSecret, userRepo, audit.NewRecorder(dbConnection))
+		go adminConsumer.Start(context.Background())
 		// El poller publica los users.profile_updated que dejan en la outbox
 		// el registro, el alta por Google y los cambios de perfil y estado.
 		go outbox.NewPoller(dbConnection, events.NewAMQPPublisher(rabbitMQURL)).Start(context.Background())
 	} else {
 		// Sin RabbitMQ los eventos quedan pendientes en outbox_events y se
 		// publican cuando el servicio arranque con RABBITMQ_URL.
-		log.Println("RABBITMQ_URL no configurada: no se inician el consumer de membership ni el publisher de eventos")
+		log.Println("RABBITMQ_URL no configurada: no se inician los consumers de membership y de admin ni el publisher de eventos")
 	}
 
 	router.GET("/livez", livez)
