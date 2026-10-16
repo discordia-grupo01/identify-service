@@ -30,7 +30,7 @@ make run
 | DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
-| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan el consumer de membresias ni el publisher de eventos: los `users.profile_updated` quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
+| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan el consumer de membresias ni el publisher de eventos: los eventos `users.*` (`profile_updated`, `account_registered`) quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
 | SMTP_USERNAME | - | Usuario SMTP. |
@@ -232,6 +232,19 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
   - Deploy: `discordia-servers` va primero (declara la cola
     `servers.user_profiles`), despues se aplican las migraciones de este
     servicio con `make migrate` y se despliega. Suma una conexion a RabbitMQ.
+- `users.account_registered` (exchange `discordia.events`) - aviso de alta de
+  cuenta (`user_id`, `email`, `name`, `created_at` en UTC). Se publica una sola
+  vez, al crear el usuario (registro con email o alta por Google), en la misma
+  transaccion que su `users.profile_updated` (mismo outbox): si falla el insert,
+  falla el alta entera. No tiene `version` porque email y fecha de alta no
+  cambian; el consumidor (el listado de usuarios de `discordia-admin`) lo trata
+  como idempotente. El orden entre este evento y el `profile_updated` del alta
+  es arbitrario.
+  - **Privacidad**: lleva el email. Solo la cola de `discordia-admin` debe
+    enlazarse a esta routing key; ningun otro servicio deberia bindearla.
+  - **Backfill**: la migracion `000017_backfill_account_registered` deja un
+    evento por cada usuario existente. Reaplicarlo es seguro; para relanzarlo a
+    mano, correr el `INSERT ... SELECT` de ese archivo.
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
