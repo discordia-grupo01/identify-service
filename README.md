@@ -30,7 +30,8 @@ make run
 | DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
-| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan el consumer de membresias ni el publisher de eventos: los `users.profile_updated` quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
+| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan los consumers de membresias y de admin ni el publisher de eventos (**sin ella tampoco se aplican las suspensiones de cuentas**): los eventos `users.*` (`profile_updated`, `account_registered`) quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
+| ADMIN_EVENTS_HMAC_SECRET | - | Secreto HMAC compartido con `discordia-admin` para verificar la firma de `admin.user_suspended` / `admin.user_reactivated`. **Obligatoria cuando `RABBITMQ_URL` esta seteada: si falta, el servicio no arranca** (no se aceptan eventos que no se pueden verificar). La carga el equipo en el entorno; no se genera ni se commitea. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
 | SMTP_USERNAME | - | Usuario SMTP. |
@@ -68,7 +69,7 @@ identify-service/
 │   ├── model/                 structs de dominio / DTOs
 │   ├── middleware/            middlewares de Gin (auth, logging, etc.)
 │   ├── utils/email/            plantillas y envio SMTP de confirmacion y recuperacion
-│   ├── events/                 consumer de RabbitMQ (membresias de servidor, HU 36) y publisher (exchange discordia.events)
+│   ├── events/                 consumers de RabbitMQ (membresias de servidor, HU 36; admin.* de suspension) y publisher (exchange discordia.events)
 │   ├── outbox/                 outbox transaccional: Insert (misma tx que la escritura) + Poller que publica
 │   └── audit/                  registra cada evento recibido (tabla consumed_events), procesado o descartado
 ├── migrations/                migraciones de BDD (golang-migrate)
@@ -178,7 +179,7 @@ proximo `make migrate` la vuelva a intentar.
 - `POST /v1/password-reset` - aplica la nueva contraseña con el token recibido por email.
 - `PATCH /v1/me/profile` - actualiza nombre, descripcion y/o imagen del perfil. Requiere Bearer JWT y usa `multipart/form-data`.
 - `GET /v1/me/profile` - Envia informacion del usuario. Requiere Bearer JWT del mismo
-- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, status_text, status_emoji, created_at, mutual_server_ids; sin email ni description). `mutual_server_ids` son los IDs (no nombre/icono, ver PLANNING_RABBITMQ.md) de los servidores que el usuario autenticado comparte con `{id}`; vacio si no comparten ninguno o si es el propio perfil. Se alimenta de un consumer de RabbitMQ que escucha `servers.member_joined`/`servers.member_left` publicados por `discordia-servers`. Requiere Bearer JWT.
+- `GET /v1/users/{id}` - perfil publico de cualquier usuario (id, name, avatar_url, status_text, status_emoji, created_at, mutual_server_ids; sin email ni description; `404` si el usuario esta suspendido). `mutual_server_ids` son los IDs (no nombre/icono, ver PLANNING_RABBITMQ.md) de los servidores que el usuario autenticado comparte con `{id}`; vacio si no comparten ninguno o si es el propio perfil. Se alimenta de un consumer de RabbitMQ que escucha `servers.member_joined`/`servers.member_left` publicados por `discordia-servers`. Requiere Bearer JWT.
 - `PUT /v1/me/status` - fija o actualiza el estado personalizado (status_text, status_emoji). Cada campo es independiente: omitirlo no lo toca, mandarlo vacio lo limpia. Requiere Bearer JWT.
 - `DELETE /v1/me/status` - limpia el estado personalizado (idempotente). Requiere Bearer JWT.
 
@@ -232,9 +233,28 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
   - Deploy: `discordia-servers` va primero (declara la cola
     `servers.user_profiles`), despues se aplican las migraciones de este
     servicio con `make migrate` y se despliega. Suma una conexion a RabbitMQ.
+- `users.account_registered` (exchange `discordia.events`) - aviso de alta de
+  cuenta (`user_id`, `email`, `name`, `created_at` en UTC). Se publica una sola
+  vez, al crear el usuario (registro con email o alta por Google), en la misma
+  transaccion que su `users.profile_updated` (mismo outbox): si falla el insert,
+  falla el alta entera. No tiene `version` porque email y fecha de alta no
+  cambian; el consumidor (el listado de usuarios de `discordia-admin`) lo trata
+  como idempotente. El orden entre este evento y el `profile_updated` del alta
+  es arbitrario.
+  - **Privacidad**: lleva el email. Solo la cola de `discordia-admin` debe
+    enlazarse a esta routing key; ningun otro servicio deberia bindearla.
+  - **Backfill**: la migracion `000017_backfill_account_registered` deja un
+    evento por cada usuario existente. Reaplicarlo es seguro; para relanzarlo a
+    mano, correr el `INSERT ... SELECT` de ese archivo.
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
+- `admin.user_suspended` / `admin.user_reactivated` (exchange `discordia.events`, cola durable `identify.admin_events`) - publicados por `discordia-admin` cuando el staff suspende o reactiva una cuenta. La decision es solo de admin; identify guarda el estado en `users.suspended_at` / `users.suspension_version` y lo aplica.
+  - **Firma**: cada evento viaja firmado con HMAC (`ADMIN_EVENTS_HMAC_SECRET`, `Verify` de `events-contract/admin`). Sin firma, con firma invalida o con la firma de otra routing key se descarta con ack (no se reencola), se loguea `warn` con `event_id` y routing key, se audita como `discarded_invalid_signature` y **no cambia ningun estado**.
+  - **Version**: se aplica solo si `version` es mayor a `suspension_version` guardada; un duplicado o un evento fuera de orden es un no-op confirmado. Suspender guarda `suspended_at = occurred_at` y **revoca todos los refresh tokens del usuario en la misma transaccion**; reactivar deja `suspended_at = NULL`.
+  - Un `user_id` inexistente se confirma y se audita (`discarded_unknown_user`) sin crear nada; un mensaje roto o con `user_id` que no es UUID se descarta (`discarded_malformed_payload` / `discarded_invalid_payload`). Solo una falla transitoria de la base se reencola (nack requeue).
+  - **Efectos de una cuenta suspendida**: `403 ACCOUNT_SUSPENDED` en el login (contraseña, 2FA, Google y PIN), en `POST /v1/refresh` y en cualquier endpoint autenticado (`RequireAuth` consulta el estado en cada request, con una cache en memoria de 5 s que se invalida en el momento en que esta instancia aplica el evento: un access token vigente deja de servir). `GET /v1/users/{id}` de un suspendido devuelve `404`. No se borra nada de lo que el usuario hizo. Reactivarlo basta para que vuelva a entrar.
+  - El motivo de la suspension no viaja en los eventos (minimizacion de datos).
 
 **Auditoría**: cada entrega (procesada o descartada) queda registrada en
 `consumed_events` -- `internal/audit`, llamado desde `shouldRequeue` en

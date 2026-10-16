@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -58,6 +59,14 @@ func (r *oauthUserRepositoryStub) UpdateStatus(_ context.Context, _ string, _ *s
 
 func (r *oauthUserRepositoryStub) UpdatePasswordHash(_ context.Context, _ string, _ string) error {
 	return nil
+}
+
+func (r *oauthUserRepositoryStub) ApplySuspension(_ context.Context, _ string, _ bool, _ time.Time, _ int64) (repository.SuspensionResult, error) {
+	return repository.SuspensionApplied, nil
+}
+
+func (r *oauthUserRepositoryStub) IsSuspended(_ context.Context, _ string) (bool, error) {
+	return false, nil
 }
 
 type oauthIdentityRepositoryStub struct {

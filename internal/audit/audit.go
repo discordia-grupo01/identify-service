@@ -17,6 +17,11 @@ const (
 	StatusDiscardedMalformed  Status = "discarded_malformed_payload"
 	StatusDiscardedUnknownKey Status = "discarded_unknown_routing_key"
 	StatusDiscardedInvalid    Status = "discarded_invalid_payload"
+	// Un admin.* sin firma, con firma inválida o con la de otra routing key:
+	// no cambió ningún estado.
+	StatusDiscardedInvalidSignature Status = "discarded_invalid_signature"
+	// Un admin.* válido para un user_id que no existe en identify.
+	StatusDiscardedUnknownUser Status = "discarded_unknown_user"
 )
 
 type Entry struct {

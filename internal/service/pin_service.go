@@ -139,6 +139,10 @@ func (s *pinService) LoginWithPin(ctx context.Context, deviceID string, pin stri
 		return nil, ErrEmailNotVerified
 	}
 
+	if user.SuspendedAt != nil {
+		return nil, ErrAccountSuspended
+	}
+
 	// El PIN es un atajo del login de esta cuenta en este dispositivo, no una
 	// forma alternativa de esquivar el segundo factor: si la cuenta tiene 2FA
 	// activo, lo pide igual que el login con email/contrasena.

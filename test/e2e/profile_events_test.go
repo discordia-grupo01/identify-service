@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -309,20 +311,19 @@ func TestOutboxPoller_PublishesAndRetries(t *testing.T) {
 
 	failing := &fakePublisher{err: errors.New("broker down")}
 	outbox.NewPoller(db, failing).Drain(ctx)
-	var attempts int
-	var lastError sql.NullString
-	var publishedAt sql.NullTime
-	if err := db.QueryRow(`SELECT attempts, last_error, published_at FROM outbox_events`).Scan(&attempts, &lastError, &publishedAt); err != nil {
-		t.Fatalf("read outbox: %v", err)
-	}
-	if attempts != 1 || lastError.String != "broker down" || publishedAt.Valid {
-		t.Errorf("after failure: attempts=%d last_error=%q published=%v; want 1, broker down, pending", attempts, lastError.String, publishedAt.Valid)
+	// El alta deja dos eventos (profile_updated y account_registered). El
+	// poller corta el lote en el primer fallo: ese queda con el intento y el
+	// error, y los dos siguen pendientes.
+	var failed, pendingBefore int
+	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE attempts = 1 AND last_error = 'broker down'), count(*) FILTER (WHERE published_at IS NULL) FROM outbox_events`).Scan(&failed, &pendingBefore); err != nil || failed != 1 || pendingBefore != 2 {
+		t.Errorf("after failure: %d events marked failed, %d pending (err %v); want 1 and 2", failed, pendingBefore, err)
 	}
 
 	ok := &fakePublisher{}
 	outbox.NewPoller(db, ok).Drain(ctx)
-	if len(ok.published) != 1 || ok.published[0] != users.RoutingKeyProfileUpdated {
-		t.Errorf("published = %v, want one users.profile_updated", ok.published)
+	sort.Strings(ok.published)
+	if want := []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated}; !reflect.DeepEqual(ok.published, want) {
+		t.Errorf("published = %v, want %v", ok.published, want)
 	}
 	var pending int
 	if err := db.QueryRow(`SELECT count(*) FROM outbox_events WHERE published_at IS NULL`).Scan(&pending); err != nil || pending != 0 {
