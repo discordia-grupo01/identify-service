@@ -72,7 +72,8 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 // @Success      200  {object}  model.PublicUserResponse
 // @Failure      400  {object}  model.ErrorResponse  "invalid user id"
 // @Failure      401  {object}  model.ErrorResponse
-// @Failure      404  {object}  model.ErrorResponse
+// @Failure      403  {object}  model.ErrorResponse  "the caller's own account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      404  {object}  model.ErrorResponse  "no such user, or the user is suspended"
 // @Router       /v1/users/{id} [get]
 func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 	viewerUserID, exists := c.Get(middleware.UserIDKey)

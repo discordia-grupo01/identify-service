@@ -180,6 +180,7 @@ func (h *TwoFactorHandler) RegenerateRecoveryCodes(c *gin.Context) {
 // @Success      200  {object}  model.TwoFactorVerifyResponse
 // @Failure      400  {object}  model.ErrorResponse  "missing challenge_token or code"
 // @Failure      401  {object}  model.ErrorResponse  "wrong/expired code, or the challenge itself expired/was already used"
+// @Failure      403  {object}  model.ErrorResponse  "the account was suspended after the challenge was issued (ACCOUNT_SUSPENDED)"
 // @Failure      429  {object}  model.ErrorResponse  "too many failed attempts on this challenge"
 // @Router       /v1/login/2fa [post]
 func (h *TwoFactorHandler) VerifyLogin(c *gin.Context) {

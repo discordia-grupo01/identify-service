@@ -37,6 +37,7 @@ type googleLoginRequest struct {
 // @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse  "missing id_token"
 // @Failure      401  {object}  model.ErrorResponse  "token could not be validated"
+// @Failure      403  {object}  model.ErrorResponse  "the account is suspended (ACCOUNT_SUSPENDED)"
 // @Failure      503  {object}  model.ErrorResponse  "Google unreachable"
 // @Router       /v1/oauth/google [post]
 func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {

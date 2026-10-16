@@ -29,6 +29,7 @@ import (
 // @version      1.0.0
 // @description  Identity/auth service: registration, login (password, Google OAuth, device PIN), sessions, password recovery, email confirmation, profile.
 // @description  Routes under /v1/me and /v1/users require identity: the JWT is validated by Kong at the gateway (or by this service's own middleware.RequireAuth when hit directly).
+// @description  An account suspended by platform staff (discordia-admin) gets 403 ACCOUNT_SUSPENDED on every login path, on POST /v1/refresh and on every authenticated route (even with a still-valid access token); its public profile (GET /v1/users/{id}) is 404.
 // @BasePath     /
 // @securityDefinitions.apikey  BearerAuth
 // @in                          header
