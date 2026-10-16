@@ -70,7 +70,17 @@ func (r *postgresRefreshTokenRepository) RevokeFamily(ctx context.Context, famil
 }
 
 func (r *postgresRefreshTokenRepository) RevokeAllForUser(ctx context.Context, userID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	return revokeAllForUser(ctx, r.db, userID)
+}
+
+// execer lo cumplen *sql.DB y *sql.Tx: permite revocar los refresh tokens
+// tanto sueltos como dentro de una transacción ajena (ver ApplySuspension).
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func revokeAllForUser(ctx context.Context, db execer, userID string) error {
+	_, err := db.ExecContext(ctx, `
 		UPDATE refresh_tokens
 		SET revoked_at = CURRENT_TIMESTAMP
 		WHERE user_id = $1 AND revoked_at IS NULL`, userID)

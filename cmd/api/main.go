@@ -29,6 +29,7 @@ import (
 // @version      1.0.0
 // @description  Identity/auth service: registration, login (password, Google OAuth, device PIN), sessions, password recovery, email confirmation, profile.
 // @description  Routes under /v1/me and /v1/users require identity: the JWT is validated by Kong at the gateway (or by this service's own middleware.RequireAuth when hit directly).
+// @description  An account suspended by platform staff (discordia-admin) gets 403 ACCOUNT_SUSPENDED on every login path, on POST /v1/refresh and on every authenticated route (even with a still-valid access token); its public profile (GET /v1/users/{id}) is 404.
 // @BasePath     /
 // @securityDefinitions.apikey  BearerAuth
 // @in                          header
@@ -105,21 +106,36 @@ func main() {
 		router.Static("/uploads/profile-images", getEnv("PROFILE_IMAGE_DIR", "./storage/profile-images"))
 	}
 
+	// RequireAuth consulta si la cuenta está suspendida; la caché de unos
+	// segundos evita ir a la base en cada request, y el consumer de admin la
+	// invalida apenas aplica un evento en esta instancia.
+	suspensionCache := middleware.NewSuspensionCache(userRepo, 5*time.Second)
+
 	// RabbitMQ es opcional: si no hay RABBITMQ_URL (ej. en un entorno sin la
 	// dependencia levantada) el resto del servicio sigue funcionando
 	// normalmente, solo sin "servidores en común" actualizados y con los
 	// eventos de perfil esperando en la outbox.
 	if rabbitMQURL := getEnv("RABBITMQ_URL", ""); rabbitMQURL != "" {
+		// Sin el secreto no hay forma de verificar los admin.user_suspended /
+		// admin.user_reactivated, y aceptarlos sin firma dejaría a cualquiera
+		// con credenciales del broker suspender cuentas: no se arranca.
+		adminSecret := getEnv("ADMIN_EVENTS_HMAC_SECRET", "")
+		if adminSecret == "" {
+			log.Fatal("ADMIN_EVENTS_HMAC_SECRET es obligatoria cuando RABBITMQ_URL está configurada: sin ella no se puede verificar la firma de los eventos de admin")
+		}
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
 		consumer := events.NewConsumer(rabbitMQURL, membershipHandler, audit.NewRecorder(dbConnection))
 		go consumer.Start(context.Background())
+		adminConsumer := events.NewAdminConsumer(rabbitMQURL, adminSecret, userRepo, audit.NewRecorder(dbConnection))
+		adminConsumer.OnApplied(suspensionCache.Invalidate)
+		go adminConsumer.Start(context.Background())
 		// El poller publica los users.profile_updated que dejan en la outbox
 		// el registro, el alta por Google y los cambios de perfil y estado.
 		go outbox.NewPoller(dbConnection, events.NewAMQPPublisher(rabbitMQURL)).Start(context.Background())
 	} else {
 		// Sin RabbitMQ los eventos quedan pendientes en outbox_events y se
 		// publican cuando el servicio arranque con RABBITMQ_URL.
-		log.Println("RABBITMQ_URL no configurada: no se inician el consumer de membership ni el publisher de eventos")
+		log.Println("RABBITMQ_URL no configurada: no se inician los consumers de membership y de admin ni el publisher de eventos")
 	}
 
 	router.GET("/livez", livez)
@@ -139,24 +155,24 @@ func main() {
 		api.POST("/login/2fa", twoFactorHandler.VerifyLogin)
 		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
 		api.POST("/refresh", authHandler.Refresh)
-		api.POST("/logout", middleware.RequireAuth(), authHandler.Logout)
-		api.POST("/pin", middleware.RequireAuth(), pinHandler.Configure)
+		api.POST("/logout", middleware.RequireAuth(suspensionCache), authHandler.Logout)
+		api.POST("/pin", middleware.RequireAuth(suspensionCache), pinHandler.Configure)
 		api.POST("/pin/login", pinHandler.Login)
 		api.POST("/password-recovery", passwordRecoveryHandler.RecoverPassword)
 		api.POST("/password-reset", passwordRecoveryHandler.ResetPassword)
 		api.POST("/email-confirmation", emailConfirmationHandler.Request)
 		api.POST("/email-confirmation/confirm", emailConfirmationHandler.Confirm)
-		api.POST("/me/password", middleware.RequireAuth(), authHandler.SetPassword)
-		api.PATCH("/me/profile", middleware.RequireAuth(), profileHandler.Update)
-		api.GET("/me/profile", middleware.RequireAuth(), profileHandler.GetProfile)
-		api.GET("/users/:id", middleware.RequireAuth(), profileHandler.GetPublicProfile)
-		api.PUT("/me/status", middleware.RequireAuth(), profileHandler.UpdateStatus)
-		api.DELETE("/me/status", middleware.RequireAuth(), profileHandler.DeleteStatus)
-		api.GET("/me/2fa", middleware.RequireAuth(), twoFactorHandler.Status)
-		api.POST("/me/2fa/setup", middleware.RequireAuth(), twoFactorHandler.Setup)
-		api.POST("/me/2fa/activate", middleware.RequireAuth(), twoFactorHandler.Activate)
-		api.POST("/me/2fa/disable", middleware.RequireAuth(), twoFactorHandler.Disable)
-		api.POST("/me/2fa/recovery-codes", middleware.RequireAuth(), twoFactorHandler.RegenerateRecoveryCodes)
+		api.POST("/me/password", middleware.RequireAuth(suspensionCache), authHandler.SetPassword)
+		api.PATCH("/me/profile", middleware.RequireAuth(suspensionCache), profileHandler.Update)
+		api.GET("/me/profile", middleware.RequireAuth(suspensionCache), profileHandler.GetProfile)
+		api.GET("/users/:id", middleware.RequireAuth(suspensionCache), profileHandler.GetPublicProfile)
+		api.PUT("/me/status", middleware.RequireAuth(suspensionCache), profileHandler.UpdateStatus)
+		api.DELETE("/me/status", middleware.RequireAuth(suspensionCache), profileHandler.DeleteStatus)
+		api.GET("/me/2fa", middleware.RequireAuth(suspensionCache), twoFactorHandler.Status)
+		api.POST("/me/2fa/setup", middleware.RequireAuth(suspensionCache), twoFactorHandler.Setup)
+		api.POST("/me/2fa/activate", middleware.RequireAuth(suspensionCache), twoFactorHandler.Activate)
+		api.POST("/me/2fa/disable", middleware.RequireAuth(suspensionCache), twoFactorHandler.Disable)
+		api.POST("/me/2fa/recovery-codes", middleware.RequireAuth(suspensionCache), twoFactorHandler.RegenerateRecoveryCodes)
 	}
 
 	addr := host + ":" + port

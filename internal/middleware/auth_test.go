@@ -19,7 +19,7 @@ func TestRequireAuthAcceptsValidToken(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/servers/7", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/servers/7", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -37,7 +37,7 @@ func TestRequireAuthSetsUserIDInContext(t *testing.T) {
 
 	var capturedUserID any
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		capturedUserID, _ = c.Get(UserIDKey)
 		c.Status(http.StatusNoContent)
 	})
@@ -55,7 +55,7 @@ func TestRequireAuthRejectsExpiredTokenAndPreservesPendingAction(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.POST("/v1/messages", RequireAuth(), func(c *gin.Context) {
+	router.POST("/v1/messages", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -97,7 +97,7 @@ func TestRequireAuthRejectsTokenWithoutSubjectClaim(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -115,7 +115,7 @@ func TestRequireAuthRejectsMalformedToken(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -132,7 +132,7 @@ func TestRequireAuthRejectsMissingAuthorizationHeader(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -159,7 +159,7 @@ func TestRequireAuthRejectsInvalidSignature(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)
@@ -186,7 +186,7 @@ func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	router := gin.New()
-	router.GET("/v1/private", RequireAuth(), func(c *gin.Context) {
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	router.ServeHTTP(recorder, request)

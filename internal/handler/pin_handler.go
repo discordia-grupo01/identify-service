@@ -80,7 +80,7 @@ func (h *PinHandler) Configure(c *gin.Context) {
 // @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse
 // @Failure      401  {object}  model.ErrorResponse  "PIN not configured, incorrect, or malformed"
-// @Failure      403  {object}  model.ErrorResponse  "email not verified yet"
+// @Failure      403  {object}  model.ErrorResponse  "email not verified yet (EMAIL_NOT_VERIFIED), or the account is suspended (ACCOUNT_SUSPENDED)"
 // @Failure      423  {object}  model.ErrorResponse  "too many failed PIN attempts: temporarily locked, fall back to email+password"
 // @Router       /v1/pin/login [post]
 func (h *PinHandler) Login(c *gin.Context) {
@@ -105,6 +105,8 @@ func (h *PinHandler) Login(c *gin.Context) {
 				Code:    "EMAIL_NOT_VERIFIED",
 				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
 			}})
+		case errors.Is(err, service.ErrAccountSuspended):
+			respondAccountSuspended(c)
 		case errors.Is(err, service.ErrPinLocked):
 			details := map[string]any{
 				"fallback": "email_password",

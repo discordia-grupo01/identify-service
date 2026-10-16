@@ -30,6 +30,7 @@ var (
 	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
 	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
+	ErrAccountSuspended      = model.ErrAccountSuspended
 )
 
 const (
@@ -180,6 +181,11 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	if !user.EmailVerified {
 		return nil, ErrEmailNotVerified
 	}
+	// Antes de abrir un desafío 2FA: a un suspendido no se le pide el código
+	// de una sesión que no va a recibir. issueTokenPair lo vuelve a frenar.
+	if user.SuspendedAt != nil {
+		return nil, ErrAccountSuspended
+	}
 
 	if s.twoFactor != nil {
 		enabled, err := s.twoFactor.IsEnabled(ctx, user.ID)
@@ -247,6 +253,17 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string) (*model.
 		return nil, err
 	}
 
+	user, err := s.repo.GetByID(ctx, rt.UserID)
+	if err != nil {
+		return nil, err
+	}
+	// Al suspender se revocan todos sus refresh tokens, así que sin este
+	// chequeo previo un suspendido caería en "token reutilizado" (y no en
+	// ACCOUNT_SUSPENDED) y se revocaría una familia que ya está revocada.
+	if user != nil && user.SuspendedAt != nil {
+		return nil, ErrAccountSuspended
+	}
+
 	if rt.RevokedAt != nil {
 		// Posible ataque de reutilización de token: revocamos toda la familia de tokens.
 		_ = s.refreshRepo.RevokeFamily(ctx, rt.FamilyID)
@@ -260,10 +277,6 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string) (*model.
 		return nil, err
 	}
 
-	user, err := s.repo.GetByID(ctx, rt.UserID)
-	if err != nil {
-		return nil, err
-	}
 	if user == nil {
 		return nil, ErrInvalidRefreshToken
 	}
@@ -313,10 +326,16 @@ func (s *authService) issueTokenPair(ctx context.Context, user *model.User, fami
 }
 
 // issueTokenPair emite el par de tokens (access JWT + refresh token opaco) y
-// persiste el refresh token. Es compartida por authService y oauthService
+// persiste el refresh token; rechaza con ErrAccountSuspended a una cuenta
+// suspendida. Es compartida por authService y oauthService
 // para que el mecanismo de sesion (misma cookie, misma rotacion) sea
 // identico sin importar como se autentico el usuario.
 func issueTokenPair(ctx context.Context, refreshRepo repository.RefreshTokenRepository, user *model.User, familyID string) (*model.AuthResponse, error) {
+	// Único punto por el que pasan el login, el 2FA, Google, el PIN y el
+	// refresh: rechazar acá evita que un camino nuevo se olvide del bloqueo.
+	if user.SuspendedAt != nil {
+		return nil, ErrAccountSuspended
+	}
 	accessToken, err := generateAccessJWT(user.ID)
 	if err != nil {
 		return nil, err

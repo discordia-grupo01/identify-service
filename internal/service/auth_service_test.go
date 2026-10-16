@@ -81,6 +81,14 @@ func (r *userRepositoryStub) UpdatePasswordHash(_ context.Context, userID string
 	return nil
 }
 
+func (r *userRepositoryStub) ApplySuspension(_ context.Context, _ string, _ bool, _ time.Time, _ int64) (repository.SuspensionResult, error) {
+	return repository.SuspensionApplied, nil
+}
+
+func (r *userRepositoryStub) IsSuspended(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
 func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusText *string, statusEmoji *string) (*model.User, error) {
 	if r.updateErr != nil {
 		return nil, r.updateErr

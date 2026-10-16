@@ -16,7 +16,7 @@ import (
 )
 
 // userColumns es la lista de columnas que lee scanUser, en ese orden.
-const userColumns = `id, name, email, description, avatar_url, status_text, status_emoji, email_verified, verified_at, password_hash, profile_version, created_at, updated_at`
+const userColumns = `id, name, email, description, avatar_url, status_text, status_emoji, email_verified, verified_at, password_hash, profile_version, suspended_at, suspension_version, created_at, updated_at`
 
 // Las escrituras del perfil público (Create, UpdateProfile, UpdateStatus)
 // suben profile_version (Create la deja en 1) y, en la misma transacción,
@@ -39,6 +39,82 @@ type UserRepository interface {
 	// (alta puramente federada por Google): a diferencia del reset de
 	// contraseña, no depende de un token por mail.
 	UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error
+	// ApplySuspension aplica un admin.user_suspended (suspended = true,
+	// suspendedAt = occurred_at del evento) o un admin.user_reactivated
+	// (suspended = false) solo si version es mayor a suspension_version: un
+	// duplicado o un evento fuera de orden devuelve SuspensionStale y no toca
+	// nada. Suspender revoca todos los refresh tokens del usuario en la misma
+	// transacción. Un userID inexistente devuelve SuspensionUserNotFound.
+	ApplySuspension(ctx context.Context, userID string, suspended bool, suspendedAt time.Time, version int64) (SuspensionResult, error)
+	// IsSuspended dice si la cuenta está suspendida. Un userID inexistente
+	// cuenta como no suspendido (false, nil).
+	IsSuspended(ctx context.Context, userID string) (bool, error)
+}
+
+// SuspensionResult es el resultado de aplicar un evento de suspensión.
+type SuspensionResult int
+
+const (
+	// SuspensionApplied: el estado cambió (y, si suspendió, se revocaron los refresh tokens).
+	SuspensionApplied SuspensionResult = iota
+	// SuspensionStale: la versión era menor o igual a la guardada; no-op.
+	SuspensionStale
+	// SuspensionUserNotFound: no existe un usuario con ese id.
+	SuspensionUserNotFound
+)
+
+func (r *postgresUserRepository) ApplySuspension(ctx context.Context, userID string, suspended bool, suspendedAt time.Time, version int64) (SuspensionResult, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var at *time.Time
+	if suspended {
+		at = &suspendedAt
+	}
+	// El UPDATE condicional toma el lock de la fila: dos eventos concurrentes
+	// del mismo usuario se serializan y gana el de mayor versión.
+	res, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET suspended_at = $1, suspension_version = $2
+		WHERE id = $3 AND suspension_version < $2`, at, version, userID)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if changed == 0 {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists); err != nil {
+			return 0, err
+		}
+		if !exists {
+			return SuspensionUserNotFound, nil
+		}
+		return SuspensionStale, nil
+	}
+	if suspended {
+		if err := revokeAllForUser(ctx, tx, userID); err != nil {
+			return 0, fmt.Errorf("revoke refresh tokens: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return SuspensionApplied, nil
+}
+
+func (r *postgresUserRepository) IsSuspended(ctx context.Context, userID string) (bool, error) {
+	var suspended bool
+	err := r.db.QueryRowContext(ctx, `SELECT suspended_at IS NOT NULL FROM users WHERE id = $1`, userID).Scan(&suspended)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return suspended, err
 }
 
 func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error {
@@ -85,7 +161,9 @@ func (r *postgresUserRepository) GetByID(ctx context.Context, userID string) (*m
 }
 
 // Create inserta el usuario (incluido avatar_url, que trae el alta por
-// Google) con profile_version = 1 y deja su primer users.profile_updated.
+// Google) con profile_version = 1 y deja, en la misma transacción, su primer
+// users.profile_updated y su users.account_registered (este último lleva el
+// email y solo lo consume el backoffice de admin).
 func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) error {
 	return r.withProfileEvent(ctx, func(tx *sql.Tx) (*model.User, error) {
 		row := tx.QueryRowContext(ctx, `
@@ -98,6 +176,9 @@ func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) e
 			return nil, err
 		}
 		user.CreatedAt, user.UpdatedAt, user.ProfileVersion = created.CreatedAt, created.UpdatedAt, created.ProfileVersion
+		if err := outbox.Insert(ctx, tx, users.RoutingKeyAccountRegistered, AccountRegisteredEvent(created)); err != nil {
+			return nil, err
+		}
 		return created, nil
 	})
 }
@@ -192,6 +273,19 @@ func ProfileUpdatedEvent(user *model.User) users.ProfileUpdated {
 	}
 }
 
+// AccountRegisteredEvent arma el aviso de alta de cuenta de user. A diferencia
+// de ProfileUpdatedEvent lleva el email: es un dato privado, que solo debe
+// recibir la cola de admin.
+func AccountRegisteredEvent(user *model.User) users.AccountRegistered {
+	return users.AccountRegistered{
+		Meta:      envelope.Meta{EventID: uuid.NewString(), OccurredAt: time.Now().UTC()},
+		UserID:    user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		CreatedAt: user.CreatedAt.UTC(),
+	}
+}
+
 // scanUpdatedUser es scanUser para un UPDATE ... RETURNING: sin fila (userID
 // inexistente) devuelve nil, nil.
 func scanUpdatedUser(row rowScanner) (*model.User, error) {
@@ -223,6 +317,8 @@ func scanUser(row rowScanner) (*model.User, error) {
 		&user.VerifiedAt,
 		&user.PasswordHash,
 		&user.ProfileVersion,
+		&user.SuspendedAt,
+		&user.SuspensionVersion,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
