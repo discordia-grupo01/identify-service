@@ -85,7 +85,9 @@ func (r *postgresUserRepository) GetByID(ctx context.Context, userID string) (*m
 }
 
 // Create inserta el usuario (incluido avatar_url, que trae el alta por
-// Google) con profile_version = 1 y deja su primer users.profile_updated.
+// Google) con profile_version = 1 y deja, en la misma transacción, su primer
+// users.profile_updated y su users.account_registered (este último lleva el
+// email y solo lo consume el backoffice de admin).
 func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) error {
 	return r.withProfileEvent(ctx, func(tx *sql.Tx) (*model.User, error) {
 		row := tx.QueryRowContext(ctx, `
@@ -98,6 +100,9 @@ func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) e
 			return nil, err
 		}
 		user.CreatedAt, user.UpdatedAt, user.ProfileVersion = created.CreatedAt, created.UpdatedAt, created.ProfileVersion
+		if err := outbox.Insert(ctx, tx, users.RoutingKeyAccountRegistered, AccountRegisteredEvent(created)); err != nil {
+			return nil, err
+		}
 		return created, nil
 	})
 }
@@ -189,6 +194,19 @@ func ProfileUpdatedEvent(user *model.User) users.ProfileUpdated {
 		Description: user.Description,
 		StatusText:  user.StatusText,
 		StatusEmoji: user.StatusEmoji,
+	}
+}
+
+// AccountRegisteredEvent arma el aviso de alta de cuenta de user. A diferencia
+// de ProfileUpdatedEvent lleva el email: es un dato privado, que solo debe
+// recibir la cola de admin.
+func AccountRegisteredEvent(user *model.User) users.AccountRegistered {
+	return users.AccountRegistered{
+		Meta:      envelope.Meta{EventID: uuid.NewString(), OccurredAt: time.Now().UTC()},
+		UserID:    user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		CreatedAt: user.CreatedAt.UTC(),
 	}
 }
 
