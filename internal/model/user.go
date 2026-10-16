@@ -2,8 +2,14 @@ package model
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
+
+// ErrAccountSuspended: la cuenta fue suspendida por el staff de la plataforma
+// (discordia-admin). Los caminos de login, el refresh y las requests
+// autenticadas la traducen a 403 ACCOUNT_SUSPENDED.
+var ErrAccountSuspended = errors.New("la cuenta está suspendida")
 
 type User struct {
 	ID            string         `json:"id"`
@@ -18,9 +24,15 @@ type User struct {
 	PasswordHash  sql.NullString `json:"-"`
 	// ProfileVersion sube con cada cambio del perfil público y ordena los
 	// users.profile_updated de este usuario.
-	ProfileVersion int64     `json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ProfileVersion int64 `json:"-"`
+	// SuspendedAt es cuándo el staff suspendió la cuenta (nil si está activa).
+	// SuspensionVersion es la versión del último admin.user_suspended /
+	// admin.user_reactivated aplicado: ordena esos eventos (solo se aplica uno
+	// con versión mayor). Ninguno sale nunca en una respuesta.
+	SuspendedAt       *time.Time `json:"-"`
+	SuspensionVersion int64      `json:"-"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type RegisterRequest struct {
