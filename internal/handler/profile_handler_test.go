@@ -337,6 +337,18 @@ func TestProfileHandlerUpdatesProfileFromMultipartRequest(t *testing.T) {
 	}
 }
 
+func TestProfileHandlerParsesRemoveImage(t *testing.T) {
+	serviceStub := &profileServiceStub{response: &model.UserResponse{ID: "user-id"}}
+	recorder := performRemoveProfileRequest(t, serviceStub, "user-id")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.called || !serviceStub.request.RemoveImage {
+		t.Fatal("service did not receive remove_image=true")
+	}
+}
+
 func TestProfileHandlerRejectsMissingAuthentication(t *testing.T) {
 	serviceStub := &profileServiceStub{}
 	recorder := performProfileRequestWithoutUser(t, serviceStub, "user-id", "Ada", "", nil)
@@ -426,6 +438,30 @@ func performProfileRequestWithAuth(t *testing.T, profileService service.ProfileS
 		if authenticated {
 			c.Set(middleware.UserIDKey, userID)
 		}
+		NewProfileHandler(profileService).Update(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func performRemoveProfileRequest(t *testing.T, profileService service.ProfileService, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	multipartWriter := multipart.NewWriter(&body)
+	if err := multipartWriter.WriteField("remove_image", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := multipartWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/v1/me/profile", &body)
+	request.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+	router := gin.New()
+	router.PATCH("/v1/me/profile", func(c *gin.Context) {
+		c.Set(middleware.UserIDKey, userID)
 		NewProfileHandler(profileService).Update(c)
 	})
 	router.ServeHTTP(recorder, request)

@@ -113,6 +113,7 @@ type ProfileUpdateRequest struct {
 	Image            []byte
 	ImageContentType string
 	ImageProvided    bool
+	RemoveImage      bool
 }
 
 // StatusUpdateRequest representa el estado personalizado a fijar. Un campo

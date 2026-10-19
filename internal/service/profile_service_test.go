@@ -125,6 +125,40 @@ func TestProfileServiceRejectsNoChanges(t *testing.T) {
 	}
 }
 
+func TestProfileServiceRemovesAvatar(t *testing.T) {
+	user := &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/old.png"}
+	repo := &userRepositoryStub{existingUser: user}
+	storage := &profileImageStorageStub{}
+
+	response, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(
+		context.Background(),
+		"user-id",
+		model.ProfileUpdateRequest{RemoveImage: true},
+	)
+
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if response.AvatarURL != "" || user.AvatarURL != "" {
+		t.Fatalf("avatar was not removed: response=%q user=%q", response.AvatarURL, user.AvatarURL)
+	}
+	if storage.deleted != "/old.png" {
+		t.Fatalf("old avatar = %q, want it deleted", storage.deleted)
+	}
+}
+
+func TestProfileServiceRejectsUploadAndRemoveTogether(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	_, err := NewProfileService(repo, &profileImageStorageStub{}, &serverMembershipRepositoryStub{}).Update(
+		context.Background(),
+		"user-id",
+		model.ProfileUpdateRequest{ImageProvided: true, RemoveImage: true},
+	)
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+}
+
 func TestProfileServicePropagatesRepositoryAndStorageErrors(t *testing.T) {
 	databaseErr := errors.New("database unavailable")
 	storageErr := errors.New("storage unavailable")

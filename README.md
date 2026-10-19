@@ -223,6 +223,10 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
     (`internal/outbox`, cada 2 s, lotes de 20, `FOR UPDATE SKIP LOCKED`) publica
     y marca `published_at`; si RabbitMQ falla, suma `attempts`, guarda
     `last_error` y reintenta en el proximo tick.
+
+Para eliminar la foto de perfil, `PATCH /v1/me/profile` acepta
+`remove_image=true` como campo del formulario multipart; el evento publica
+`avatar_url` vacio para que las replicas y los clientes usen su fallback.
   - Verificar la confirmacion de email o setear contraseña no cambian el perfil
     publico: no suben `profile_version` ni publican.
   - **Backfill**: la migracion `000015_backfill_profile_events` deja un evento

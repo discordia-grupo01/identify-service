@@ -145,8 +145,11 @@ func (s *profileService) Update(ctx context.Context, userID string, request mode
 	if user == nil {
 		return nil, ErrUserNotFound
 	}
-	if request.Name == nil && request.Description == nil && !request.ImageProvided {
+	if request.Name == nil && request.Description == nil && !request.ImageProvided && !request.RemoveImage {
 		return nil, errors.New("no hay cambios para guardar")
+	}
+	if request.ImageProvided && request.RemoveImage {
+		return nil, ErrInvalidProfileImage
 	}
 
 	name := user.Name
@@ -175,6 +178,8 @@ func (s *profileService) Update(ctx context.Context, userID string, request mode
 		if err != nil {
 			return nil, err
 		}
+	} else if request.RemoveImage {
+		avatarURL = ""
 	}
 
 	if err := s.repo.UpdateProfile(ctx, userID, name, description, avatarURL); err != nil {
