@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
@@ -123,6 +124,7 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 // @Param        name         formData  string  false  "New display name"
 // @Param        description  formData  string  false  "New description"
 // @Param        image        formData  file    false  "New profile image"
+// @Param        remove_image formData  boolean false  "Remove the current profile image"
 // @Success      200  {object}  model.UserResponse
 // @Failure      400  {object}  model.ErrorResponse  "invalid name/description/image"
 // @Failure      401  {object}  model.ErrorResponse
@@ -144,6 +146,14 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 	}
 	if description, exists := c.GetPostForm("description"); exists {
 		request.Description = &description
+	}
+	if removeImage, exists := c.GetPostForm("remove_image"); exists {
+		parsed, err := strconv.ParseBool(removeImage)
+		if err != nil {
+			writeProfileInputError(c, errors.New("remove_image debe ser booleano"))
+			return
+		}
+		request.RemoveImage = parsed
 	}
 
 	fileHeader, err := c.FormFile("image")

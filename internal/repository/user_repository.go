@@ -183,19 +183,43 @@ func (r *postgresUserRepository) Create(ctx context.Context, user *model.User) e
 	})
 }
 
+// UpdateEmailVerification con verified = true deja, en la misma transacción,
+// un users.email_verified para el backoffice de admin. Solo lo publica la
+// primera vez: si el email ya estaba verificado no escribe nada.
 func (r *postgresUserRepository) UpdateEmailVerification(ctx context.Context, userID string, verified bool) error {
 	if verified {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE users
-			SET email_verified = TRUE, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-			WHERE id = $1`, userID)
-		return err
+		return r.markEmailVerified(ctx, userID)
 	}
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE users
 		SET email_verified = FALSE, verified_at = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1`, userID)
 	return err
+}
+
+func (r *postgresUserRepository) markEmailVerified(ctx context.Context, userID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var verifiedAt time.Time
+	err = tx.QueryRowContext(ctx, `
+		UPDATE users
+		SET email_verified = TRUE, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND email_verified = FALSE
+		RETURNING verified_at`, userID).Scan(&verifiedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := outbox.Insert(ctx, tx, users.RoutingKeyEmailVerified, EmailVerifiedEvent(userID, verifiedAt)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateProfile no falla si userID no existe (no escribe nada ni publica).
@@ -278,11 +302,22 @@ func ProfileUpdatedEvent(user *model.User) users.ProfileUpdated {
 // recibir la cola de admin.
 func AccountRegisteredEvent(user *model.User) users.AccountRegistered {
 	return users.AccountRegistered{
-		Meta:      envelope.Meta{EventID: uuid.NewString(), OccurredAt: time.Now().UTC()},
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		CreatedAt: user.CreatedAt.UTC(),
+		Meta:          envelope.Meta{EventID: uuid.NewString(), OccurredAt: time.Now().UTC()},
+		UserID:        user.ID,
+		Email:         user.Email,
+		Name:          user.Name,
+		CreatedAt:     user.CreatedAt.UTC(),
+		EmailVerified: user.EmailVerified,
+	}
+}
+
+// EmailVerifiedEvent arma el aviso de que userID confirmó su email. Como
+// users.account_registered, solo lo consume la cola de admin.
+func EmailVerifiedEvent(userID string, verifiedAt time.Time) users.EmailVerified {
+	return users.EmailVerified{
+		Meta:       envelope.Meta{EventID: uuid.NewString(), OccurredAt: time.Now().UTC()},
+		UserID:     userID,
+		VerifiedAt: verifiedAt.UTC(),
 	}
 }
 

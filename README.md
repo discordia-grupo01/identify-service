@@ -30,7 +30,7 @@ make run
 | DATABASE_SCHEMA | - (vacio) | Vacio en local. En Supabase, el schema dedicado de este servicio dentro del proyecto compartido (ver seccion "Supabase" mas abajo). |
 | JWT_SECRET | - | Secreto para firmar/validar JWT. |
 | TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
-| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan los consumers de membresias y de admin ni el publisher de eventos (**sin ella tampoco se aplican las suspensiones de cuentas**): los eventos `users.*` (`profile_updated`, `account_registered`) quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
+| RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan los consumers de membresias y de admin ni el publisher de eventos (**sin ella tampoco se aplican las suspensiones de cuentas**): los eventos `users.*` (`profile_updated`, `account_registered`, `email_verified`) quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
 | ADMIN_EVENTS_HMAC_SECRET | - | Secreto HMAC compartido con `discordia-admin` para verificar la firma de `admin.user_suspended` / `admin.user_reactivated`. **Obligatoria cuando `RABBITMQ_URL` esta seteada: si falta, el servicio no arranca** (no se aceptan eventos que no se pueden verificar). La carga el equipo en el entorno; no se genera ni se commitea. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
@@ -223,6 +223,10 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
     (`internal/outbox`, cada 2 s, lotes de 20, `FOR UPDATE SKIP LOCKED`) publica
     y marca `published_at`; si RabbitMQ falla, suma `attempts`, guarda
     `last_error` y reintenta en el proximo tick.
+
+Para eliminar la foto de perfil, `PATCH /v1/me/profile` acepta
+`remove_image=true` como campo del formulario multipart; el evento publica
+`avatar_url` vacio para que las replicas y los clientes usen su fallback.
   - Verificar la confirmacion de email o setear contraseña no cambian el perfil
     publico: no suben `profile_version` ni publican.
   - **Backfill**: la migracion `000015_backfill_profile_events` deja un evento
@@ -234,7 +238,8 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
     `servers.user_profiles`), despues se aplican las migraciones de este
     servicio con `make migrate` y se despliega. Suma una conexion a RabbitMQ.
 - `users.account_registered` (exchange `discordia.events`) - aviso de alta de
-  cuenta (`user_id`, `email`, `name`, `created_at` en UTC). Se publica una sola
+  cuenta (`user_id`, `email`, `name`, `created_at` en UTC y `email_verified`:
+  `true` en el alta por Google, `false` en el registro con email). Se publica una sola
   vez, al crear el usuario (registro con email o alta por Google), en la misma
   transaccion que su `users.profile_updated` (mismo outbox): si falla el insert,
   falla el alta entera. No tiene `version` porque email y fecha de alta no
@@ -246,6 +251,21 @@ La clave `service_role` tiene privilegios elevados: guardarla solo como secreto 
   - **Backfill**: la migracion `000017_backfill_account_registered` deja un
     evento por cada usuario existente. Reaplicarlo es seguro; para relanzarlo a
     mano, correr el `INSERT ... SELECT` de ese archivo.
+- `users.email_verified` (exchange `discordia.events`) - aviso de que el usuario
+  confirmo su email (`user_id`, `verified_at` en UTC). Se publica una sola vez,
+  en la misma transaccion que marca `email_verified` (mismo outbox): si el email
+  ya estaba verificado no se publica de nuevo, y si falla el insert la
+  verificacion hace rollback. El alta por Google no lo publica (nace verificada
+  en `users.account_registered`). El backoffice de `discordia-admin` lo usa para
+  dejar de mostrar al usuario como "pendiente".
+  - **Privacidad**: igual que `users.account_registered`, solo la cola de
+    `discordia-admin` debe enlazarse a esta routing key.
+  - **Backfill**: la migracion `000019_backfill_email_verified` deja un evento
+    por cada usuario que ya tenia el email verificado. Reaplicarlo es seguro;
+    para relanzarlo a mano, correr el `INSERT ... SELECT` de ese archivo.
+  - Deploy: `discordia-admin` va primero (enlaza `admin.users` a esta routing
+    key); si identify publica antes, RabbitMQ descarta los eventos y hay que
+    relanzar el backfill a mano.
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.

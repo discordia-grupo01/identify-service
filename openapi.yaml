@@ -488,6 +488,9 @@ paths:
                   description: New profile image
                   type: string
                   format: binary
+                remove_image:
+                  description: Remove the current profile image
+                  type: boolean
       responses:
         "200":
           description: OK

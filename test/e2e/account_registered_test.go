@@ -13,7 +13,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
 )
 
-var accountRegisteredKeys = []string{"event_id", "occurred_at", "user_id", "email", "name", "created_at"}
+var accountRegisteredKeys = []string{"event_id", "occurred_at", "user_id", "email", "name", "created_at", "email_verified"}
 
 // accountRegisteredEvents devuelve los users.account_registered de userID que
 // quedaron en la outbox, con el payload crudo de cada uno.
@@ -49,15 +49,15 @@ func accountRegisteredEvents(t *testing.T, db *sql.DB, userID string) ([]users.A
 	return evts, raws
 }
 
-func assertAccountRegistered(t *testing.T, db *sql.DB, userID, wantEmail, wantName string) {
+func assertAccountRegistered(t *testing.T, db *sql.DB, userID, wantEmail, wantName string, wantVerified bool) {
 	t.Helper()
 	evts, raws := accountRegisteredEvents(t, db, userID)
 	if len(evts) != 1 {
 		t.Fatalf("users.account_registered = %d, want 1", len(evts))
 	}
 	evt := evts[0]
-	if evt.UserID != userID || evt.Email != wantEmail || evt.Name != wantName {
-		t.Errorf("event = %+v, want user %s, email %s, name %s", evt, userID, wantEmail, wantName)
+	if evt.UserID != userID || evt.Email != wantEmail || evt.Name != wantName || evt.EmailVerified != wantVerified {
+		t.Errorf("event = %+v, want user %s, email %s, name %s, email_verified %v", evt, userID, wantEmail, wantName, wantVerified)
 	}
 	if _, err := uuid.Parse(evt.EventID); err != nil || evt.OccurredAt.IsZero() {
 		t.Errorf("event meta = %+v, want uuid event_id and occurred_at", evt.Meta)
@@ -90,7 +90,7 @@ func TestAccountRegistered_PasswordSignup(t *testing.T) {
 
 	userID, _ := registerAndLogin(t, router, "Grace", "grace@example.com", "Passw0rd!")
 
-	assertAccountRegistered(t, db, userID, "grace@example.com", "Grace")
+	assertAccountRegistered(t, db, userID, "grace@example.com", "Grace", false)
 	if evts, _ := profileEvents(t, db, userID); len(evts) != 1 {
 		t.Errorf("users.profile_updated = %d, want 1 alongside account_registered", len(evts))
 	}
@@ -119,7 +119,7 @@ func TestAccountRegistered_GoogleSignupPublishesOnce(t *testing.T) {
 		t.Fatalf("read user: %v", err)
 	}
 
-	assertAccountRegistered(t, db, userID, "heidi@example.com", "Heidi")
+	assertAccountRegistered(t, db, userID, "heidi@example.com", "Heidi", true)
 }
 
 // Si falla solo el insert de users.account_registered, el alta entera hace
