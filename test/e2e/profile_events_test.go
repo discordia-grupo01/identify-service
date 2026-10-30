@@ -311,18 +311,19 @@ func TestOutboxPoller_PublishesAndRetries(t *testing.T) {
 
 	failing := &fakePublisher{err: errors.New("broker down")}
 	outbox.NewPoller(db, failing).Drain(ctx)
-	// El alta deja dos eventos (profile_updated y account_registered). El
-	// poller corta el lote en el primer fallo: ese queda con el intento y el
-	// error, y los dos siguen pendientes.
+	// El alta deja tres eventos (profile_updated, account_registered y, al
+	// confirmar el email, email_verified). El poller corta el lote en el
+	// primer fallo: ese queda con el intento y el error, y los tres siguen
+	// pendientes.
 	var failed, pendingBefore int
-	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE attempts = 1 AND last_error = 'broker down'), count(*) FILTER (WHERE published_at IS NULL) FROM outbox_events`).Scan(&failed, &pendingBefore); err != nil || failed != 1 || pendingBefore != 2 {
-		t.Errorf("after failure: %d events marked failed, %d pending (err %v); want 1 and 2", failed, pendingBefore, err)
+	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE attempts = 1 AND last_error = 'broker down'), count(*) FILTER (WHERE published_at IS NULL) FROM outbox_events`).Scan(&failed, &pendingBefore); err != nil || failed != 1 || pendingBefore != 3 {
+		t.Errorf("after failure: %d events marked failed, %d pending (err %v); want 1 and 3", failed, pendingBefore, err)
 	}
 
 	ok := &fakePublisher{}
 	outbox.NewPoller(db, ok).Drain(ctx)
 	sort.Strings(ok.published)
-	if want := []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated}; !reflect.DeepEqual(ok.published, want) {
+	if want := []string{users.RoutingKeyAccountRegistered, users.RoutingKeyEmailVerified, users.RoutingKeyProfileUpdated}; !reflect.DeepEqual(ok.published, want) {
 		t.Errorf("published = %v, want %v", ok.published, want)
 	}
 	var pending int
