@@ -18,8 +18,8 @@ func TestLocalStorageSaveWritesImageAndReturnsURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if imageURL != "/uploads/profile-images/user-id.png" {
-		t.Fatalf("URL = %q", imageURL)
+	if !strings.HasPrefix(imageURL, "/uploads/profile-images/user-id.png?v=") {
+		t.Fatalf("URL = %q, want versioned /uploads/profile-images/user-id.png", imageURL)
 	}
 	stored, err := os.ReadFile(filepath.Join(directory, "user-id.png"))
 	if err != nil {
@@ -103,5 +103,58 @@ func TestLocalStorageHonorsCanceledContext(t *testing.T) {
 	}
 	if err := storage.Delete(ctx, "/images/user-id.png"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Delete() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestLocalStorageSaveReturnsADifferentURLOnEveryUpload(t *testing.T) {
+	storage := NewLocalStorage(t.TempDir(), "/images")
+	firstURL, err := storage.Save(context.Background(), "user-id", []byte("first"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondURL, err := storage.Save(context.Background(), "user-id", []byte("second"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if firstURL == secondURL {
+		t.Fatalf("Save() devolvio la misma URL dos veces (%q): los clientes cachearian la foto vieja", firstURL)
+	}
+	if !SameObject(firstURL, secondURL) {
+		t.Fatalf("SameObject(%q, %q) = false, want true", firstURL, secondURL)
+	}
+}
+
+func TestLocalStorageDeleteIgnoresVersionQuery(t *testing.T) {
+	directory := t.TempDir()
+	storage := NewLocalStorage(directory, "/images")
+	imageURL, err := storage.Save(context.Background(), "user-id", []byte("data"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := storage.Delete(context.Background(), imageURL); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "user-id.png")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("image still exists or unexpected error: %v", err)
+	}
+}
+
+func TestSameObject(t *testing.T) {
+	tests := []struct {
+		first, second string
+		want          bool
+	}{
+		{"/images/user-id.png?v=1", "/images/user-id.png?v=2", true},
+		{"/images/user-id.png", "/images/user-id.png?v=2", true},
+		{"/images/user-id.jpg?v=1", "/images/user-id.png?v=1", false},
+		{"", "/images/user-id.png?v=1", false},
+		{"", "", true},
+	}
+	for _, test := range tests {
+		if got := SameObject(test.first, test.second); got != test.want {
+			t.Errorf("SameObject(%q, %q) = %v, want %v", test.first, test.second, got, test.want)
+		}
 	}
 }

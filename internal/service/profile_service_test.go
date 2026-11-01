@@ -558,3 +558,18 @@ func validPNG(t *testing.T) []byte {
 func stringPointer(value string) *string {
 	return &value
 }
+
+func TestProfileServiceDoesNotDeleteReplacedAvatarOfSameObject(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/uploads/profile-images/user-id.png?v=old"}}
+	storage := &profileImageStorageStub{url: "/uploads/profile-images/user-id.png?v=new"}
+	response, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Image: validPNG(t), ImageContentType: "image/png", ImageProvided: true})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if storage.deleted != "" {
+		t.Fatalf("deleted = %q, want no deletion", storage.deleted)
+	}
+	if response.AvatarURL != storage.url {
+		t.Fatalf("AvatarURL = %q, want %q", response.AvatarURL, storage.url)
+	}
+}
