@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -44,9 +45,9 @@ func TestSupabaseStorageSaveAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	wantURL := server.URL + "/storage/v1/object/public/profile-images/user-id.png"
-	if imageURL != wantURL {
-		t.Fatalf("URL = %q, want %q", imageURL, wantURL)
+	wantURL := server.URL + "/storage/v1/object/public/profile-images/user-id.png?v="
+	if !strings.HasPrefix(imageURL, wantURL) {
+		t.Fatalf("URL = %q, want prefix %q", imageURL, wantURL)
 	}
 	if err := storage.Delete(context.Background(), imageURL); err != nil {
 		t.Fatalf("Delete() error = %v", err)
@@ -112,8 +113,8 @@ func TestSupabaseStorageSaveIgnoresMissingStaleFormats(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Save() error = %v, want nil", err)
 			}
-			if want := server.URL + "/storage/v1/object/public/profile-images/user-id.png"; imageURL != want {
-				t.Fatalf("URL = %q, want %q", imageURL, want)
+			if want := server.URL + "/storage/v1/object/public/profile-images/user-id.png?v="; !strings.HasPrefix(imageURL, want) {
+				t.Fatalf("URL = %q, want prefix %q", imageURL, want)
 			}
 			for _, path := range deletedPaths {
 				if path == "/storage/v1/object/profile-images/user-id.png" {
