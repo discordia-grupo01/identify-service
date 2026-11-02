@@ -182,13 +182,14 @@ func (s *profileService) Update(ctx context.Context, userID string, request mode
 		avatarURL = ""
 	}
 
+	sameObject := profileimage.SameObject(avatarURL, oldAvatarURL)
 	if err := s.repo.UpdateProfile(ctx, userID, name, description, avatarURL); err != nil {
-		if avatarURL != oldAvatarURL && avatarURL != "" {
+		if !sameObject && avatarURL != "" {
 			_ = s.storage.Delete(ctx, avatarURL)
 		}
 		return nil, err
 	}
-	if avatarURL != oldAvatarURL && oldAvatarURL != "" {
+	if !sameObject && oldAvatarURL != "" {
 		_ = s.storage.Delete(ctx, oldAvatarURL)
 	}
 

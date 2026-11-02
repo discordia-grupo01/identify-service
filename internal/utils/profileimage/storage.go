@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Storage interface {
@@ -32,6 +34,26 @@ func imageExtension(contentType string) (string, bool) {
 }
 
 var profileImageExtensions = []string{".jpg", ".png", ".gif"}
+
+const versionParam = "v"
+
+func versionedURL(imageURL string) string {
+	return imageURL + "?" + versionParam + "=" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// WithoutVersion devuelve la URL sin query string (sin el ?v= de Save).
+func WithoutVersion(imageURL string) string {
+	if index := strings.IndexByte(imageURL, '?'); index >= 0 {
+		return imageURL[:index]
+	}
+	return imageURL
+}
+
+// SameObject dice si dos URLs devueltas por Save apuntan al mismo archivo
+// guardado, aunque tengan distinta version.
+func SameObject(firstURL, secondURL string) bool {
+	return WithoutVersion(firstURL) == WithoutVersion(secondURL)
+}
 
 func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, contentType string) (string, error) {
 	select {
@@ -76,7 +98,7 @@ func (s *LocalStorage) Save(ctx context.Context, userID string, data []byte, con
 		}
 	}
 
-	return s.baseURL + "/" + filename, nil
+	return versionedURL(s.baseURL + "/" + filename), nil
 }
 
 func (s *LocalStorage) Delete(ctx context.Context, imageURL string) error {
@@ -86,7 +108,7 @@ func (s *LocalStorage) Delete(ctx context.Context, imageURL string) error {
 	default:
 	}
 
-	filename := filepath.Base(imageURL)
+	filename := filepath.Base(WithoutVersion(imageURL))
 	if filename == "." || filename == string(filepath.Separator) || filename == "" {
 		return nil
 	}

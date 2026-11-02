@@ -71,7 +71,7 @@ func (s *SupabaseStorage) Save(ctx context.Context, userID string, data []byte, 
 		return "", err
 	}
 
-	return s.publicBaseURL + "/" + objectPath, nil
+	return versionedURL(s.publicBaseURL + "/" + objectPath), nil
 }
 
 func (s *SupabaseStorage) Delete(ctx context.Context, imageURL string) error {
@@ -121,6 +121,7 @@ func (s *SupabaseStorage) objectURL(objectPath string) string {
 
 func (s *SupabaseStorage) objectPath(imageURL string) (string, bool) {
 	prefix := s.publicBaseURL + "/"
+	imageURL = WithoutVersion(imageURL)
 	if !strings.HasPrefix(imageURL, prefix) {
 		return "", false
 	}
