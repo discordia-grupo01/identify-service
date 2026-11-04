@@ -129,6 +129,14 @@ func main() {
 		adminConsumer := events.NewAdminConsumer(rabbitMQURL, adminSecret, userRepo, audit.NewRecorder(dbConnection))
 		adminConsumer.OnApplied(suspensionCache.Invalidate)
 		go adminConsumer.Start(context.Background())
+		// Sin el secreto de billing no se puede verificar billing.premium_updated:
+		// el consumer no arranca y nadie pasa a Premium, pero el resto sigue
+		// funcionando (no se tumba identify por una feature opcional).
+		if billingSecret := getEnv("BILLING_EVENTS_HMAC_SECRET", ""); billingSecret != "" {
+			go events.NewBillingConsumer(rabbitMQURL, billingSecret, userRepo, audit.NewRecorder(dbConnection)).Start(context.Background())
+		} else {
+			log.Println("BILLING_EVENTS_HMAC_SECRET no configurada: no se inicia el consumer de billing (Premium no se actualiza)")
+		}
 		// El poller publica los users.profile_updated que dejan en la outbox
 		// el registro, el alta por Google y los cambios de perfil y estado.
 		go outbox.NewPoller(dbConnection, events.NewAMQPPublisher(rabbitMQURL)).Start(context.Background())

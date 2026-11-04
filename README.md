@@ -32,6 +32,7 @@ make run
 | TWO_FACTOR_ENCRYPTION_KEY | (cae a `JWT_SECRET`) | Clave con la que se cifra el secreto TOTP del segundo factor antes de guardarlo. **Rotarla (o rotar `JWT_SECRET` mientras esta esté vacía) deja ilegibles los secretos ya guardados: todos los usuarios con 2FA activo quedarían afuera y tendrían que volver a activarlo.** |
 | RABBITMQ_URL | - | URL de conexion a RabbitMQ. Sin ella no arrancan los consumers de membresias y de admin ni el publisher de eventos (**sin ella tampoco se aplican las suspensiones de cuentas**): los eventos `users.*` (`profile_updated`, `account_registered`, `email_verified`) quedan pendientes en `outbox_events` y se publican cuando el servicio arranque con la variable. |
 | ADMIN_EVENTS_HMAC_SECRET | - | Secreto HMAC compartido con `discordia-admin` para verificar la firma de `admin.user_suspended` / `admin.user_reactivated`. **Obligatoria cuando `RABBITMQ_URL` esta seteada: si falta, el servicio no arranca** (no se aceptan eventos que no se pueden verificar). La carga el equipo en el entorno; no se genera ni se commitea. |
+| BILLING_EVENTS_HMAC_SECRET | - | Secreto HMAC compartido con `discordia-billing` (y messaging) para verificar la firma de `billing.premium_updated`. Si falta, no arranca el consumer de billing y el campo `premium` de los perfiles no se actualiza; el resto del servicio funciona igual. |
 | SMTP_HOST | - | Host del servidor SMTP. |
 | SMTP_PORT | 587 | Puerto SMTP con STARTTLS. |
 | SMTP_USERNAME | - | Usuario SMTP. |
@@ -275,6 +276,10 @@ Para eliminar la foto de perfil, `PATCH /v1/me/profile` acepta
   - Un `user_id` inexistente se confirma y se audita (`discarded_unknown_user`) sin crear nada; un mensaje roto o con `user_id` que no es UUID se descarta (`discarded_malformed_payload` / `discarded_invalid_payload`). Solo una falla transitoria de la base se reencola (nack requeue).
   - **Efectos de una cuenta suspendida**: `403 ACCOUNT_SUSPENDED` en el login (contraseña, 2FA, Google y PIN), en `POST /v1/refresh` y en cualquier endpoint autenticado (`RequireAuth` consulta el estado en cada request, con una cache en memoria de 5 s que se invalida en el momento en que esta instancia aplica el evento: un access token vigente deja de servir). `GET /v1/users/{id}` de un suspendido devuelve `404`. No se borra nada de lo que el usuario hizo. Reactivarlo basta para que vuelva a entrar.
   - El motivo de la suspension no viaja en los eventos (minimizacion de datos).
+- `billing.premium_updated` (exchange `discordia.events`, cola durable `identify.billing_events`) - publicado por `discordia-billing` cada vez que cambia el Premium de un usuario (pago, renovacion, cancelacion, devolucion o vencimiento). Es una foto completa; identify solo guarda `active` en `users.premium_active` y lo muestra como `premium` en `GET /v1/me/profile` y `GET /v1/users/{id}`.
+  - **Firma**: igual que los de admin, pero con `BILLING_EVENTS_HMAC_SECRET` (`Verify` de `events-contract/billing`). Un evento sin firma valida se descarta con ack y no cambia nada: un evento falso regalaria Premium.
+  - **Version**: se aplica solo si `version` es mayor a `users.premium_version`; un duplicado o un evento fuera de orden es un no-op confirmado. Un `user_id` inexistente se confirma sin crear nada, y solo una falla transitoria de la base se reencola.
+  - Si `BILLING_EVENTS_HMAC_SECRET` no esta seteada, el consumer no se inicia y `premium` queda en `false`.
 
 **Auditoría**: cada entrega (procesada o descartada) queda registrada en
 `consumed_events` -- `internal/audit`, llamado desde `shouldRequeue` en

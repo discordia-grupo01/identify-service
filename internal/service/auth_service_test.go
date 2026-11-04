@@ -85,6 +85,10 @@ func (r *userRepositoryStub) ApplySuspension(_ context.Context, _ string, _ bool
 	return repository.SuspensionApplied, nil
 }
 
+func (r *userRepositoryStub) ApplyPremium(_ context.Context, _ string, _ bool, _ int64) (repository.PremiumResult, error) {
+	return repository.PremiumApplied, nil
+}
+
 func (r *userRepositoryStub) IsSuspended(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }

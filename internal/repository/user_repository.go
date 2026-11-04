@@ -16,7 +16,7 @@ import (
 )
 
 // userColumns es la lista de columnas que lee scanUser, en ese orden.
-const userColumns = `id, name, email, description, avatar_url, status_text, status_emoji, email_verified, verified_at, password_hash, profile_version, suspended_at, suspension_version, created_at, updated_at`
+const userColumns = `id, name, email, description, avatar_url, status_text, status_emoji, email_verified, verified_at, password_hash, profile_version, suspended_at, suspension_version, premium_active, premium_version, created_at, updated_at`
 
 // Las escrituras del perfil público (Create, UpdateProfile, UpdateStatus)
 // suben profile_version (Create la deja en 1) y, en la misma transacción,
@@ -46,6 +46,11 @@ type UserRepository interface {
 	// nada. Suspender revoca todos los refresh tokens del usuario en la misma
 	// transacción. Un userID inexistente devuelve SuspensionUserNotFound.
 	ApplySuspension(ctx context.Context, userID string, suspended bool, suspendedAt time.Time, version int64) (SuspensionResult, error)
+	// ApplyPremium aplica un billing.premium_updated solo si version es mayor a
+	// premium_version: un duplicado o un evento fuera de orden devuelve
+	// PremiumStale y no toca nada. Un userID inexistente devuelve
+	// PremiumUserNotFound.
+	ApplyPremium(ctx context.Context, userID string, active bool, version int64) (PremiumResult, error)
 	// IsSuspended dice si la cuenta está suspendida. Un userID inexistente
 	// cuenta como no suspendido (false, nil).
 	IsSuspended(ctx context.Context, userID string) (bool, error)
@@ -106,6 +111,45 @@ func (r *postgresUserRepository) ApplySuspension(ctx context.Context, userID str
 		return 0, err
 	}
 	return SuspensionApplied, nil
+}
+
+// PremiumResult es el resultado de aplicar un billing.premium_updated.
+type PremiumResult int
+
+const (
+	// PremiumApplied: se guardó el evento (premium_active puede no haber cambiado).
+	PremiumApplied PremiumResult = iota
+	// PremiumStale: la versión era menor o igual a la guardada; no-op.
+	PremiumStale
+	// PremiumUserNotFound: no existe un usuario con ese id.
+	PremiumUserNotFound
+)
+
+func (r *postgresUserRepository) ApplyPremium(ctx context.Context, userID string, active bool, version int64) (PremiumResult, error) {
+	// El UPDATE condicional toma el lock de la fila: dos eventos concurrentes
+	// del mismo usuario se serializan y gana el de mayor versión.
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET premium_active = $1, premium_version = $2
+		WHERE id = $3 AND premium_version < $2`, active, version, userID)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if changed == 1 {
+		return PremiumApplied, nil
+	}
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists); err != nil {
+		return 0, err
+	}
+	if !exists {
+		return PremiumUserNotFound, nil
+	}
+	return PremiumStale, nil
 }
 
 func (r *postgresUserRepository) IsSuspended(ctx context.Context, userID string) (bool, error) {
@@ -354,6 +398,8 @@ func scanUser(row rowScanner) (*model.User, error) {
 		&user.ProfileVersion,
 		&user.SuspendedAt,
 		&user.SuspensionVersion,
+		&user.PremiumActive,
+		&user.PremiumVersion,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
