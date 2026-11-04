@@ -31,8 +31,13 @@ type User struct {
 	// con versión mayor). Ninguno sale nunca en una respuesta.
 	SuspendedAt       *time.Time `json:"-"`
 	SuspensionVersion int64      `json:"-"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	// PremiumActive es la réplica de lo que decide billing.
+	// PremiumVersion es la versión del último billing.premium_updated
+	// aplicado: solo se aplica uno con versión mayor.
+	PremiumActive  bool      `json:"-"`
+	PremiumVersion int64     `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type RegisterRequest struct {
@@ -79,6 +84,7 @@ type UserResponse struct {
 	StatusText    string    `json:"status_text"`
 	StatusEmoji   string    `json:"status_emoji"`
 	EmailVerified bool      `json:"email_verified"`
+	Premium       bool      `json:"premium"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -103,6 +109,7 @@ type PublicUserResponse struct {
 	AvatarURL   string `json:"avatar_url"`
 	StatusText  string `json:"status_text"`
 	StatusEmoji string `json:"status_emoji"`
+	Premium     bool   `json:"premium"`
 
 	MutualServerIDs []string `json:"mutual_server_ids"`
 }
@@ -133,6 +140,7 @@ func NewUserResponse(user *User) *UserResponse {
 		StatusText:    user.StatusText,
 		StatusEmoji:   user.StatusEmoji,
 		EmailVerified: user.EmailVerified,
+		Premium:       user.PremiumActive,
 		CreatedAt:     user.CreatedAt.UTC(),
 	}
 }
@@ -145,6 +153,7 @@ func NewPublicUserResponse(user *User) *PublicUserResponse {
 		AvatarURL:       user.AvatarURL,
 		StatusText:      user.StatusText,
 		StatusEmoji:     user.StatusEmoji,
+		Premium:         user.PremiumActive,
 		MutualServerIDs: []string{},
 	}
 }
