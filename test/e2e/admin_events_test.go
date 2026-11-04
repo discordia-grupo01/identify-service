@@ -349,7 +349,7 @@ func TestAdminConsumer_RabbitMQPipeline(t *testing.T) {
 		suspendedAt, version := suspensionStateQuiet(db, user.UserID)
 		return suspendedAt.Valid && version == 2
 	}, "el consumer no aplicó la suspensión publicada")
-	assertConsumedEventStatus(t, db, suspend.EventID, "processed")
+	waitForConsumedEventStatus(t, db, suspend.EventID, "processed")
 	if n := activeRefreshTokens(t, db, user.UserID); n != 0 {
 		t.Errorf("active refresh tokens = %d, want 0", n)
 	}

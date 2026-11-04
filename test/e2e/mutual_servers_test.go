@@ -279,8 +279,8 @@ func TestMutualServersRabbitMQPipeline(t *testing.T) {
 	// La auditoría (consumed_events) debe reflejar ambos MemberJoined como
 	// procesados -- es lo que permite comparar, del otro lado, contra
 	// outbox_events de servers y detectar un evento que nunca llegó.
-	assertConsumedEventStatus(t, db, "77777777-7777-7777-7777-777777777777", "processed")
-	assertConsumedEventStatus(t, db, "88888888-8888-8888-8888-888888888888", "processed")
+	waitForConsumedEventStatus(t, db, "77777777-7777-7777-7777-777777777777", "processed")
+	waitForConsumedEventStatus(t, db, "88888888-8888-8888-8888-888888888888", "processed")
 
 	publishMembershipEvent(t, rabbitMQURL, membership.RoutingKeyMemberLeft, membership.MemberJoined{
 		Meta: envelope.Meta{EventID: "99999999-9999-9999-9999-999999999999", OccurredAt: time.Now().UTC()}, ServerID: serverAliceAndBob, UserID: aliceID,
@@ -374,6 +374,18 @@ func assertConsumedEventStatus(t *testing.T, db *sql.DB, eventID, wantStatus str
 	if gotStatus != wantStatus {
 		t.Errorf("consumed_events.status for event_id=%s = %q, want %q", eventID, gotStatus, wantStatus)
 	}
+}
+
+// waitForConsumedEventStatus es para los tests con broker real: el consumer
+// audita después de aplicar el cambio, así que ver el cambio no garantiza que
+// la fila de auditoría ya exista.
+func waitForConsumedEventStatus(t *testing.T, db *sql.DB, eventID, wantStatus string) {
+	t.Helper()
+	waitForCondition(t, 10*time.Second, func() bool {
+		var gotStatus string
+		err := db.QueryRow(`SELECT status FROM consumed_events WHERE event_id = $1`, eventID).Scan(&gotStatus)
+		return err == nil && gotStatus == wantStatus
+	}, fmt.Sprintf("consumed_events de event_id=%s nunca llegó a status %q", eventID, wantStatus))
 }
 
 // connectionNameForTest debe coincidir con el nombre de conexión que
