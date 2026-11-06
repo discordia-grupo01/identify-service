@@ -42,6 +42,7 @@ type EmailConfirmationServiceImpl struct {
 	userRepo         repository.UserRepository
 	mailer           EmailConfirmationMailer
 	confirmBaseURL   string
+	appConfirmURL    string
 	expiration       time.Duration
 	limit            int
 	clock            func() time.Time
@@ -56,6 +57,7 @@ func NewEmailConfirmationService(repo repository.EmailConfirmationRepository, us
 		userRepo:         userRepo,
 		mailer:           mailer,
 		confirmBaseURL:   confirmBaseURL,
+		appConfirmURL:    appConfirmationBaseURL(confirmBaseURL),
 		expiration:       emailConfirmationExpiration(),
 		limit:            emailConfirmationLimit(),
 		clock:            time.Now,
@@ -98,7 +100,11 @@ func (s *EmailConfirmationServiceImpl) RequestEmailConfirmation(ctx context.Cont
 		return fmt.Errorf("create email confirmation request: %w", err)
 	}
 
-	confirmURL, err := buildConfirmationURL(s.confirmBaseURL, token)
+	baseURL := s.confirmBaseURL
+	if request.ReturnTo == model.ReturnToApp && s.appConfirmURL != "" {
+		baseURL = s.appConfirmURL
+	}
+	confirmURL, err := buildConfirmationURL(baseURL, token)
 	if err != nil {
 		return fmt.Errorf("build email confirmation URL: %w", err)
 	}
@@ -156,6 +162,22 @@ func GenerateEmailConfirmationToken() (string, error) {
 func HashEmailConfirmationToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// appConfirmationBaseURL es la pagina puente de la web que abre la app con
+// discordia://confirm-email?token=... Se puede fijar con
+// EMAIL_CONFIRMATION_APP_URL; si no, se arma en el mismo dominio que
+// EMAIL_CONFIRMATION_URL. Un link de mail tiene que ser https: el cliente de
+// correo no abre discordia:// directo.
+func appConfirmationBaseURL(confirmBaseURL string) string {
+	if configured := getEnv("EMAIL_CONFIRMATION_APP_URL", ""); configured != "" {
+		return configured
+	}
+	parsed, err := url.Parse(confirmBaseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/app-link/confirm-email"
 }
 
 func buildConfirmationURL(baseURL string, token string) (string, error) {

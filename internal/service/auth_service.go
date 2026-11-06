@@ -143,7 +143,7 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 		return nil, err
 	}
 	if s.confirmationRequester != nil {
-		if err := s.confirmationRequester.RequestEmailConfirmation(ctx, model.EmailConfirmationRequest{Email: user.Email}); err != nil {
+		if err := s.confirmationRequester.RequestEmailConfirmation(ctx, model.EmailConfirmationRequest{Email: user.Email, ReturnTo: req.ReturnTo}); err != nil {
 			return nil, fmt.Errorf("send registration confirmation email: %w", err)
 		}
 	}

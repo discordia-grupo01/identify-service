@@ -1005,3 +1005,32 @@ func parseTokenClaims(t *testing.T, tokenString string) jwt.MapClaims {
 	}
 	return claims
 }
+
+type confirmationRequesterStub struct {
+	requests []model.EmailConfirmationRequest
+}
+
+func (s *confirmationRequesterStub) RequestEmailConfirmation(_ context.Context, request model.EmailConfirmationRequest) error {
+	s.requests = append(s.requests, request)
+	return nil
+}
+
+func TestAuthServiceRegisterPassesReturnToTheConfirmationEmail(t *testing.T) {
+	requester := &confirmationRequesterStub{}
+	service := NewAuthService(&userRepositoryStub{}, nil, WithEmailConfirmation(requester))
+
+	_, err := service.Register(context.Background(), model.RegisterRequest{
+		Name:     "Ada Lovelace",
+		Email:    "ada@example.com",
+		Password: "Secure123",
+		ReturnTo: model.ReturnToApp,
+	})
+
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	want := model.EmailConfirmationRequest{Email: "ada@example.com", ReturnTo: model.ReturnToApp}
+	if len(requester.requests) != 1 || requester.requests[0] != want {
+		t.Fatalf("confirmation requests = %+v, want [%+v]", requester.requests, want)
+	}
+}
