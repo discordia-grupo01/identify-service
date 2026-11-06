@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -492,5 +493,48 @@ func TestEmailConfirmationServiceRequestUnknownEmailDoesNotRevealUser(t *testing
 
 	if len(mailer.sent) != 0 {
 		t.Fatal("unknown user must not receive an email")
+	}
+}
+
+func TestEmailConfirmationServiceRequestFromAppLinksToTheAppBridge(t *testing.T) {
+	cases := map[string]struct {
+		returnTo string
+		wantBase string
+	}{
+		"app": {model.ReturnToApp, "https://example.com/app-link/confirm-email?token="},
+		"web": {"web", "https://example.com/confirm?token="},
+		"sin": {"", "https://example.com/confirm?token="},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			user := &model.User{ID: "user-1", Email: "ada@example.com", Name: "Ada"}
+			mailer := &emailConfirmationMailerStub{}
+			service := NewEmailConfirmationService(
+				newEmailConfirmationRepositoryStub(),
+				&userRepositoryStub{existingUser: user},
+				mailer,
+				"https://example.com/confirm",
+			)
+
+			err := service.RequestEmailConfirmation(context.Background(), model.EmailConfirmationRequest{
+				Email:    user.Email,
+				ReturnTo: tc.returnTo,
+			})
+
+			if err != nil {
+				t.Fatalf("RequestEmailConfirmation() error = %v", err)
+			}
+			if len(mailer.sent) != 1 || !strings.HasPrefix(mailer.sent[0].ConfirmURL, tc.wantBase) {
+				t.Fatalf("confirm URL = %+v, want prefix %q", mailer.sent, tc.wantBase)
+			}
+		})
+	}
+}
+
+func TestEmailConfirmationAppURLCanBeConfigured(t *testing.T) {
+	t.Setenv("EMAIL_CONFIRMATION_APP_URL", "https://app.example.com/abrir")
+
+	if got := appConfirmationBaseURL("https://example.com/confirm"); got != "https://app.example.com/abrir" {
+		t.Fatalf("appConfirmationBaseURL() = %q", got)
 	}
 }
