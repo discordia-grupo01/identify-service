@@ -951,6 +951,12 @@ components:
       properties:
         email:
           type: string
+        return_to:
+          description: 'Con "app" el link del mail abre la app mobile (pasa por la página puente /app-link/confirm-email de la web).'
+          enum:
+          - web
+          - app
+          type: string
       required:
         - email
       type: object
@@ -1034,6 +1040,12 @@ components:
         name:
           type: string
         password:
+          type: string
+        return_to:
+          description: 'Con "app" el link del mail abre la app mobile (pasa por la página puente /app-link/confirm-email de la web).'
+          enum:
+          - web
+          - app
           type: string
       required:
         - email
