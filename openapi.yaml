@@ -952,10 +952,14 @@ components:
         email:
           type: string
         return_to:
-          description: 'Con "app" el link del mail abre la app mobile (pasa por la página puente /app-link/confirm-email de la web).'
+          description: >-
+            "app" cuando lo pide la app mobile: el link del mail pasa por una
+            pagina
+
+            puente de la web que abre la app. Vacio o "web", el link de siempre.
           enum:
-          - web
-          - app
+            - web
+            - app
           type: string
       required:
         - email
@@ -1042,10 +1046,14 @@ components:
         password:
           type: string
         return_to:
-          description: 'Con "app" el link del mail abre la app mobile (pasa por la página puente /app-link/confirm-email de la web).'
+          description: >-
+            Igual que en EmailConfirmationRequest: "app" hace que el mail de
+            alta
+
+            abra la app mobile.
           enum:
-          - web
-          - app
+            - web
+            - app
           type: string
       required:
         - email
