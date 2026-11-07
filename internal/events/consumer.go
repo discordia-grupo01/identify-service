@@ -11,6 +11,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
 	"github.com/discordia-grupo01/identify-service/internal/logging"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -111,7 +112,10 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo cerrado")
 			}
-			retrier.Settle(ctx, delivery, shouldRequeue(ctx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body))
+			spanCtx, end := telemetry.StartConsumer(ctx, queue.Name, delivery)
+			requeue := shouldRequeue(spanCtx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body)
+			retrier.Settle(spanCtx, delivery, requeue)
+			end(requeue)
 		}
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 // Insert guarda un evento pendiente de publicar dentro de tx. Si falla, el
@@ -22,9 +24,9 @@ func Insert(ctx context.Context, tx *sql.Tx, routingKey string, payload any) err
 		return fmt.Errorf("outbox: marshal payload for %q: %w", routingKey, err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO outbox_events (id, routing_key, payload)
-		VALUES ($1, $2, $3)`,
-		uuid.NewString(), routingKey, body,
+		INSERT INTO outbox_events (id, routing_key, payload, traceparent)
+		VALUES ($1, $2, $3, NULLIF($4, ''))`,
+		uuid.NewString(), routingKey, body, telemetry.Traceparent(ctx),
 	); err != nil {
 		return fmt.Errorf("outbox: insert event %q: %w", routingKey, err)
 	}
