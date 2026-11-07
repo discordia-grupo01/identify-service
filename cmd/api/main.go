@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/outbox"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -36,6 +36,8 @@ import (
 // @name                        Authorization
 // @description                 Type "Bearer" followed by a space and the JWT.
 func main() {
+	logging.MustSetup("identify-service")
+
 	environment := getEnv("ENVIRONMENT", "development")
 	host := getEnv("HOST", "0.0.0.0")
 	port := getEnv("PORT", "8080")
@@ -46,15 +48,16 @@ func main() {
 
 	dbConnection := initDB()
 	if dbConnection == nil {
-		log.Fatal("failed to connect to the database")
+		logging.Fatalf("failed to connect to the database")
 	}
 	defer func() {
 		if err := dbConnection.Close(); err != nil {
-			log.Printf("error closing database connection: %v", err)
+			logging.Errorf("error closing database connection: %v", err)
 		}
 	}()
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(logging.Middleware(), logging.Recovery())
 
 	userRepo := repository.NewUserRepository(dbConnection)
 	refreshRepo := repository.NewRefreshTokenRepository(dbConnection)
@@ -65,11 +68,11 @@ func main() {
 	devicePinRepo := repository.NewDevicePinRepository(dbConnection)
 	emailConfig, err := emailutil.ConfigFromEnv()
 	if err != nil {
-		log.Fatalf("invalid email configuration: %v", err)
+		logging.Fatalf("invalid email configuration: %v", err)
 	}
 	emailService, err := emailutil.NewSMTPService(emailConfig)
 	if err != nil {
-		log.Fatalf("invalid email configuration: %v", err)
+		logging.Fatalf("invalid email configuration: %v", err)
 	}
 	passwordRecoveryService := service.NewPasswordRecoveryService(passwordRecoveryRepo, userRepo, emailService)
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
@@ -77,7 +80,7 @@ func main() {
 	emailConfirmationHandler := handler.NewEmailConfirmationHandler(emailConfirmationService)
 	twoFactorCipher, err := twofactor.NewCipher(getEnv("TWO_FACTOR_ENCRYPTION_KEY", getEnv("JWT_SECRET", "")))
 	if err != nil {
-		log.Fatalf("invalid two factor configuration: %v", err)
+		logging.Fatalf("invalid two factor configuration: %v", err)
 	}
 	twoFactorRepo := repository.NewTwoFactorRepository(dbConnection)
 	twoFactorService := service.NewTwoFactorService(twoFactorRepo, userRepo, refreshRepo, twoFactorCipher)
@@ -121,7 +124,7 @@ func main() {
 		// con credenciales del broker suspender cuentas: no se arranca.
 		adminSecret := getEnv("ADMIN_EVENTS_HMAC_SECRET", "")
 		if adminSecret == "" {
-			log.Fatal("ADMIN_EVENTS_HMAC_SECRET es obligatoria cuando RABBITMQ_URL está configurada: sin ella no se puede verificar la firma de los eventos de admin")
+			logging.Fatalf("ADMIN_EVENTS_HMAC_SECRET es obligatoria cuando RABBITMQ_URL está configurada: sin ella no se puede verificar la firma de los eventos de admin")
 		}
 		membershipHandler := events.NewMembershipHandler(membershipRepo)
 		consumer := events.NewConsumer(rabbitMQURL, membershipHandler, audit.NewRecorder(dbConnection))
@@ -135,7 +138,7 @@ func main() {
 		if billingSecret := getEnv("BILLING_EVENTS_HMAC_SECRET", ""); billingSecret != "" {
 			go events.NewBillingConsumer(rabbitMQURL, billingSecret, userRepo, audit.NewRecorder(dbConnection)).Start(context.Background())
 		} else {
-			log.Println("BILLING_EVENTS_HMAC_SECRET no configurada: no se inicia el consumer de billing (Premium no se actualiza)")
+			logging.Warnf("BILLING_EVENTS_HMAC_SECRET no configurada: no se inicia el consumer de billing (Premium no se actualiza)")
 		}
 		// El poller publica los users.profile_updated que dejan en la outbox
 		// el registro, el alta por Google y los cambios de perfil y estado.
@@ -143,7 +146,7 @@ func main() {
 	} else {
 		// Sin RabbitMQ los eventos quedan pendientes en outbox_events y se
 		// publican cuando el servicio arranque con RABBITMQ_URL.
-		log.Println("RABBITMQ_URL no configurada: no se inician los consumers de membership y de admin ni el publisher de eventos")
+		logging.Warnf("RABBITMQ_URL no configurada: no se inician los consumers de membership y de admin ni el publisher de eventos")
 	}
 
 	router.GET("/livez", livez)
@@ -184,8 +187,8 @@ func main() {
 	}
 
 	addr := host + ":" + port
-	log.Printf("listening on %s", addr)
-	log.Fatal(router.Run(addr))
+	logging.Infof("listening on %s", addr)
+	logging.Fatalf("%v", router.Run(addr))
 }
 
 // livez godoc
@@ -242,11 +245,11 @@ func newProfileImageStorage() profileimage.Storage {
 			getEnv("PROFILE_IMAGE_PUBLIC_URL", ""),
 		)
 		if err != nil {
-			log.Fatalf("invalid Supabase image storage configuration: %v", err)
+			logging.Fatalf("invalid Supabase image storage configuration: %v", err)
 		}
 		return storage
 	default:
-		log.Fatalf("unsupported PROFILE_IMAGE_STORAGE %q: use local or supabase", getEnv("PROFILE_IMAGE_STORAGE", "local"))
+		logging.Fatalf("unsupported PROFILE_IMAGE_STORAGE %q: use local or supabase", getEnv("PROFILE_IMAGE_STORAGE", "local"))
 		return nil
 	}
 }

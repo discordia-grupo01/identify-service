@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/discordia-grupo01/events-contract/broker"
 	"github.com/discordia-grupo01/events-contract/membership"
 	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -41,7 +41,7 @@ func (c *Consumer) Start(ctx context.Context) {
 
 	for ctx.Err() == nil {
 		if err := c.consumeOnce(ctx); err != nil {
-			log.Printf("events: conexión a RabbitMQ interrumpida, reintentando en %s: %v", backoff, err)
+			logging.Warnf("events: conexión a RabbitMQ interrumpida, reintentando en %s: %v", backoff, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -120,7 +120,7 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 // Devuelve true si el mensaje debe reintentarse, false si se descarta.
 func shouldRequeue(ctx context.Context, handler MembershipHandler, recorder *audit.Recorder, routingKey string, body []byte) bool {
 	if routingKey != membership.RoutingKeyMemberJoined && routingKey != membership.RoutingKeyMemberLeft {
-		log.Printf("events: routing key desconocida %q, descartando mensaje", routingKey)
+		logging.Warnf("events: routing key desconocida %q, descartando mensaje", routingKey)
 		recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedUnknownKey})
 		return false
 	}
@@ -130,7 +130,7 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, recorder *aud
 	// it's only used to read/validate fields before dispatching below.
 	var payload membership.MemberJoined
 	if err := json.Unmarshal(body, &payload); err != nil {
-		log.Printf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
+		logging.Warnf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
 		recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedMalformed, Err: err})
 		return false
 	}
@@ -140,12 +140,12 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, recorder *aud
 	// trataría como fallo de DB y lo reintentaría para siempre (mensaje
 	// "poison"). Se descarta acá, igual que un payload malformado.
 	if payload.UserID == "" {
-		log.Printf("events: payload inválido en %q (user_id vacío), event_id=%s, descartando mensaje", routingKey, payload.EventID)
+		logging.Warnf("events: payload inválido en %q (user_id vacío), event_id=%s, descartando mensaje", routingKey, payload.EventID)
 		recorder.Record(ctx, audit.Entry{EventID: payload.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalid, Err: errors.New("user_id vacío")})
 		return false
 	}
 	if _, err := uuid.Parse(payload.ServerID); err != nil {
-		log.Printf("events: payload inválido en %q (server_id %q no es un UUID), event_id=%s: %v, descartando mensaje", routingKey, payload.ServerID, payload.EventID, err)
+		logging.Warnf("events: payload inválido en %q (server_id %q no es un UUID), event_id=%s: %v, descartando mensaje", routingKey, payload.ServerID, payload.EventID, err)
 		recorder.Record(ctx, audit.Entry{EventID: payload.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalid, Err: err})
 		return false
 	}
@@ -158,14 +158,14 @@ func shouldRequeue(ctx context.Context, handler MembershipHandler, recorder *aud
 		err = handler.HandleMemberLeft(ctx, membership.MemberLeft{Meta: payload.Meta, ServerID: payload.ServerID, UserID: payload.UserID})
 	}
 	if err != nil {
-		log.Printf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, payload.EventID, err)
+		logging.Errorf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, payload.EventID, err)
 		recorder.Record(ctx, audit.Entry{EventID: payload.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusPending, Err: err})
 		return true
 	}
 	// event_id identifica este evento en los logs de discordia-servers (el
 	// publisher) para poder correlacionar ambos lados de principio a fin; no
 	// participa en la idempotencia acá (esa la da occurred_at vía Upsert).
-	log.Printf("events: procesado %q event_id=%s server_id=%s user_id=%s", routingKey, payload.EventID, payload.ServerID, payload.UserID)
+	logging.Infof("events: procesado %q event_id=%s server_id=%s user_id=%s", routingKey, payload.EventID, payload.ServerID, payload.UserID)
 	recorder.Record(ctx, audit.Entry{EventID: payload.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
 	return false
 }
