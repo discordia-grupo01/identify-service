@@ -13,6 +13,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/discordia-grupo01/identify-service/internal/audit"
+	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 )
 
@@ -112,6 +113,12 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 
 	// Ack manual: solo se confirma después de procesar, para no perder un
 	// evento ante una falla transitoria de la base.
+	retrier, err := deadletter.New(conn, queue.Name, deadletter.DefaultPolicy())
+	if err != nil {
+		return err
+	}
+	defer retrier.Close()
+
 	messages, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return err
@@ -125,11 +132,7 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo de admin cerrado")
 			}
-			if c.Process(ctx, delivery.RoutingKey, delivery.Body) {
-				_ = delivery.Nack(false, true)
-			} else {
-				_ = delivery.Ack(false)
-			}
+			retrier.Settle(ctx, delivery, c.Process(ctx, delivery.RoutingKey, delivery.Body))
 		}
 	}
 }

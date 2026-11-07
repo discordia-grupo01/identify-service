@@ -10,6 +10,7 @@ import (
 	"github.com/discordia-grupo01/events-contract/broker"
 	"github.com/discordia-grupo01/events-contract/membership"
 	"github.com/discordia-grupo01/identify-service/internal/audit"
+	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -91,6 +92,12 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 
 	// Ack manual (autoAck=false): el mensaje solo se confirma después de
 	// procesarlo, para no perder eventos ante un fallo transitorio de DB.
+	retrier, err := deadletter.New(conn, queue.Name, deadletter.DefaultPolicy())
+	if err != nil {
+		return err
+	}
+	defer retrier.Close()
+
 	messages, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return err
@@ -104,17 +111,9 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo cerrado")
 			}
-			c.handleDelivery(ctx, delivery)
+			retrier.Settle(ctx, delivery, shouldRequeue(ctx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body))
 		}
 	}
-}
-
-func (c *Consumer) handleDelivery(ctx context.Context, delivery amqp.Delivery) {
-	if shouldRequeue(ctx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body) {
-		_ = delivery.Nack(false, true)
-		return
-	}
-	_ = delivery.Ack(false)
 }
 
 // Handler para manejo de errores en un envio de mensajes por diferentes factores como errores de red, errores de base de datos, etc.
