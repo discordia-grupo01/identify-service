@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/logging"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 func initDB() *sql.DB {
@@ -27,7 +28,7 @@ func initDB() *sql.DB {
 		dsn += fmt.Sprintf(" options='-c search_path=%s'", dbSchema)
 	}
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := telemetry.OpenSQL("postgres", dsn)
 	if err != nil {
 		logging.Fatalf("Error crítico al abrir driver de Postgres: %v", err)
 	}
