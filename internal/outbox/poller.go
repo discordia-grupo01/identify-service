@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 )
 
 // Publisher publica un evento y devuelve error si no llegó al broker, para
@@ -51,7 +52,7 @@ func (p *Poller) Drain(ctx context.Context) {
 	for i := 0; i < batchSize; i++ {
 		published, err := p.publishOne(ctx)
 		if err != nil {
-			log.Printf("outbox: fallo el tick del poller: %v", err)
+			logging.Errorf("outbox: fallo el tick del poller: %v", err)
 			return
 		}
 		if !published {
@@ -89,7 +90,7 @@ func (p *Poller) publishOne(ctx context.Context) (published bool, err error) {
 	}
 
 	if pubErr := p.publisher.Publish(ctx, routingKey, json.RawMessage(payload)); pubErr != nil {
-		log.Printf("outbox: no se pudo publicar %q (id=%s), se reintenta en el próximo tick: %v", routingKey, id, pubErr)
+		logging.Warnf("outbox: no se pudo publicar %q (id=%s), se reintenta en el próximo tick: %v", routingKey, id, pubErr)
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE outbox_events SET attempts = attempts + 1, last_error = $2 WHERE id = $1`,
 			id, pubErr.Error(),

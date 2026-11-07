@@ -3,11 +3,11 @@ package handler
 import (
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -192,7 +192,7 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 				Message: "El usuario no existe",
 			}})
 		default:
-			log.Printf("profile update failed for user %v: %v", userID, err)
+			logging.Errorf("profile update failed for user %v: %v", userID, err)
 			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
 				Code:    "INTERNAL_SERVER_ERROR",
 				Message: "Ha ocurrido un error inesperado en el servidor",
