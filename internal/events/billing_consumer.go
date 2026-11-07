@@ -15,6 +15,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
 	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 // BillingQueueName es la cola durable de este consumidor de billing.*;
@@ -120,7 +121,10 @@ func (c *BillingConsumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo de billing cerrado")
 			}
-			retrier.Settle(ctx, delivery, c.Process(ctx, delivery.RoutingKey, delivery.Body))
+			spanCtx, end := telemetry.StartConsumer(ctx, queue.Name, delivery)
+			requeue := c.Process(spanCtx, delivery.RoutingKey, delivery.Body)
+			retrier.Settle(spanCtx, delivery, requeue)
+			end(requeue)
 		}
 	}
 }

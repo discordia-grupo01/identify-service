@@ -16,6 +16,7 @@ import (
 	"github.com/discordia-grupo01/identify-service/internal/outbox"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 	emailutil "github.com/discordia-grupo01/identify-service/internal/utils/email"
 	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
 	"github.com/discordia-grupo01/identify-service/internal/utils/profileimage"
@@ -46,6 +47,16 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), "identify-service")
+	if err != nil {
+		logging.Fatalf("telemetry: %v", err)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(flushCtx)
+	}()
+
 	dbConnection := initDB()
 	if dbConnection == nil {
 		logging.Fatalf("failed to connect to the database")
@@ -57,7 +68,7 @@ func main() {
 	}()
 
 	router := gin.New()
-	router.Use(logging.Middleware(), logging.Recovery())
+	router.Use(telemetry.Middleware(), logging.Middleware(), logging.Recovery())
 
 	userRepo := repository.NewUserRepository(dbConnection)
 	refreshRepo := repository.NewRefreshTokenRepository(dbConnection)
