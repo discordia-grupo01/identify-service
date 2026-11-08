@@ -56,6 +56,22 @@ make run
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya esta en `.gitignore`).
 
+### Protección del login
+
+Los intentos fallidos de `POST /v1/login` se cuentan en tres buckets:
+`(email, IP)` (5 en 15 minutos), `email` (20 en 1 hora) e `IP` (100 en
+15 minutos). El bucket combinado evita que los errores de una persona afecten
+a toda una red compartida; los otros dos evitan repartir un ataque entre
+distintas IP o cuentas. A partir del cuarto fallo del par se aplica un
+backoff creciente, limitado a 2 segundos. Al superar cualquier límite se
+responde `429 LOGIN_ATTEMPTS_EXCEEDED` con `Retry-After`.
+
+Los contadores solo se escriben para credenciales inválidas. Un login exitoso
+limpia únicamente el bucket `(email, IP)`, nunca el historial compartido de
+la cuenta o de la red. La integración de CAPTCHA debe hacerse en el borde
+antes de aceptar intentos posteriores; no se habilita con una validación local
+falsa porque requiere un proveedor y una clave de servidor.
+
 ## Estructura de carpetas
 ```
 identify-service/

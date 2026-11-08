@@ -154,6 +154,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/model.ErrorResponse"
+        "429":
+          description: too many failed login attempts; includes Retry-After
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
       summary: Log in with email and password
       tags:
         - auth

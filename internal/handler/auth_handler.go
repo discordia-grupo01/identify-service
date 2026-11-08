@@ -3,6 +3,8 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
@@ -176,6 +178,7 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 // @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
 // @Failure      400  {object}  model.ErrorResponse
 // @Failure      401  {object}  model.ErrorResponse  "wrong email/password"
+// @Failure      429  {object}  model.ErrorResponse  "too many failed login attempts; includes Retry-After"
 // @Failure      403  {object}  model.ErrorResponse  "email not verified yet (EMAIL_NOT_VERIFIED), or the account is suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -214,10 +217,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			})
 			return
 		case errors.Is(err, service.ErrLoginAttemptsExceeded):
+			var rateLimitErr *service.LoginRateLimitError
+			if errors.As(err, &rateLimitErr) {
+				c.Header("Retry-After", strconv.FormatInt(int64(rateLimitErr.RetryAfter/time.Second), 10))
+			}
 			c.JSON(http.StatusTooManyRequests, model.ErrorResponse{
 				Error: model.APIError{
 					Code:    "LOGIN_ATTEMPTS_EXCEEDED",
-					Message: "Demasiados intentos fallidos. Esperá unos minutos y probá de nuevo",
+					Message: "Demasiados intentos fallidos. Esperá y probá de nuevo",
 				},
 			})
 			return

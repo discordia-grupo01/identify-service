@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -124,11 +125,26 @@ var _ repository.LoginAttemptRepository = (*loginAttemptRepositoryStub)(nil)
 
 func loginAttemptKey(email, ip string) string { return email + "|" + ip }
 
-func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, _ time.Time) (int, error) {
+func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, _ time.Time, _ time.Time) (repository.LoginAttemptCounts, error) {
 	if r.countErr != nil {
-		return 0, r.countErr
+		return repository.LoginAttemptCounts{}, r.countErr
 	}
-	return r.failures[loginAttemptKey(email, ip)], nil
+	counts := repository.LoginAttemptCounts{
+		EmailIP: r.failures[loginAttemptKey(email, ip)],
+	}
+	for key, count := range r.failures {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if parts[0] == email {
+			counts.Email += count
+		}
+		if parts[1] == ip {
+			counts.IP += count
+		}
+	}
+	return counts, nil
 }
 
 func (r *loginAttemptRepositoryStub) RecordFailure(_ context.Context, email string, ip string) error {
@@ -688,6 +704,7 @@ func TestAuthServiceLogin_SameEmailDifferentIP_NotBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
+
 	repo := &userRepositoryStub{existingUser: &model.User{
 		ID:            "550e8400-e29b-41d4-a716-446655440000",
 		Email:         "ada@example.com",
@@ -713,6 +730,41 @@ func TestAuthServiceLogin_SameEmailDifferentIP_NotBlocked(t *testing.T) {
 	if result == nil || result.Auth == nil {
 		t.Fatalf("Login() from a different IP must return a session: %+v", result)
 	}
+}
+
+func TestAuthServiceLogin_BlocksEmailAndIPBucketsIndependently(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("Secure123"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{
+		ID: "550e8400-e29b-41d4-a716-446655440000", Email: "ada@example.com",
+		PasswordHash: sql.NullString{String: string(passwordHash), Valid: true}, EmailVerified: true,
+	}}
+
+	t.Run("email bucket", func(t *testing.T) {
+		attempts := newLoginAttemptRepositoryStub()
+		for i := 0; i < maxLoginEmailAttempts; i++ {
+			attempts.failures[loginAttemptKey("ada@example.com", "198.51.100."+strconv.Itoa(i))] = 1
+		}
+		_, err := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts)).Login(
+			context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123", IP: "203.0.113.1"})
+		if !errors.Is(err, ErrLoginAttemptsExceeded) {
+			t.Fatalf("Login() error = %v, want email bucket limit", err)
+		}
+	})
+
+	t.Run("ip bucket", func(t *testing.T) {
+		attempts := newLoginAttemptRepositoryStub()
+		for i := 0; i < maxLoginIPAttempts; i++ {
+			attempts.failures[loginAttemptKey("user"+strconv.Itoa(i)+"@example.com", "203.0.113.1")] = 1
+		}
+		_, err := NewAuthService(repo, newRefreshTokenRepositoryStub(), WithLoginAttempts(attempts)).Login(
+			context.Background(), model.LoginRequest{Email: "ada@example.com", Password: "Secure123", IP: "203.0.113.1"})
+		if !errors.Is(err, ErrLoginAttemptsExceeded) {
+			t.Fatalf("Login() error = %v, want IP bucket limit", err)
+		}
+	})
 }
 
 func TestAuthServiceLogin_WrongPassword_RecordsFailure(t *testing.T) {

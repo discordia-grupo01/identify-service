@@ -203,12 +203,25 @@ func TestAuthHandlerLoginUsesSameErrorForUnknownEmailAndWrongPassword(t *testing
 			if recorder.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 			}
+
 			var response model.ErrorResponse
 			decodeJSON(t, recorder, &response)
 			if response.Error.Code != "INVALID_CREDENTIALS" {
 				t.Fatalf("error code = %q, want INVALID_CREDENTIALS", response.Error.Code)
 			}
 		})
+	}
+}
+
+func TestAuthHandlerLoginRateLimitIncludesRetryAfter(t *testing.T) {
+	serviceStub := &authServiceStub{err: &service.LoginRateLimitError{RetryAfter: 15 * time.Minute}}
+	recorder := performLoginRequest(t, serviceStub, `{"email":"ada@example.com","password":"Wrong123"}`)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	if got := recorder.Header().Get("Retry-After"); got != "900" {
+		t.Fatalf("Retry-After = %q, want 900", got)
 	}
 }
 
