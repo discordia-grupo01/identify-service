@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/discordia-grupo01/events-contract/admin"
@@ -14,7 +13,9 @@ import (
 
 	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events/deadletter"
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 // AdminQueueName es la cola durable de este consumidor de admin.*; ningún otro
@@ -67,7 +68,7 @@ func (c *AdminConsumer) Start(ctx context.Context) {
 
 	for ctx.Err() == nil {
 		if err := c.consumeOnce(ctx); err != nil {
-			log.Printf("events: conexión de admin a RabbitMQ interrumpida, reintentando en %s: %v", backoff, err)
+			logging.Warnf("events: conexión de admin a RabbitMQ interrumpida, reintentando en %s: %v", backoff, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -132,7 +133,10 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo de admin cerrado")
 			}
-			retrier.Settle(ctx, delivery, c.Process(ctx, delivery.RoutingKey, delivery.Body))
+			spanCtx, end := telemetry.StartConsumer(ctx, queue.Name, delivery)
+			requeue := c.Process(spanCtx, delivery.RoutingKey, delivery.Body)
+			retrier.Settle(spanCtx, delivery, requeue)
+			end(requeue)
 		}
 	}
 }
@@ -142,7 +146,7 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 // inválida, mensaje roto, usuario inexistente, duplicado o evento viejo.
 func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []byte) bool {
 	if routingKey != admin.RoutingKeyUserSuspended && routingKey != admin.RoutingKeyUserReactivated {
-		log.Printf("events: routing key de admin desconocida %q, descartando mensaje", routingKey)
+		logging.Warnf("events: routing key de admin desconocida %q, descartando mensaje", routingKey)
 		c.recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedUnknownKey})
 		return false
 	}
@@ -150,7 +154,7 @@ func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []b
 	// UserSuspended y UserReactivated comparten forma en el cable.
 	var event admin.UserSuspended
 	if err := json.Unmarshal(body, &event); err != nil {
-		log.Printf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
+		logging.Warnf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
 		c.recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedMalformed, Err: err})
 		return false
 	}
@@ -163,7 +167,7 @@ func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []b
 		validSignature = admin.UserReactivated(event).Verify(c.secret)
 	}
 	if !validSignature {
-		log.Printf("events: WARN firma inválida en %q, event_id=%s, descartando mensaje sin cambiar nada", routingKey, event.EventID)
+		logging.Warnf("events: WARN firma inválida en %q, event_id=%s, descartando mensaje sin cambiar nada", routingKey, event.EventID)
 		// Sin EventID: el event_id de un mensaje sin autenticar no es confiable
 		// y, como es único en consumed_events, uno falsificado pisaría la fila
 		// de auditoría de un evento legítimo.
@@ -172,27 +176,27 @@ func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []b
 	}
 
 	if _, err := uuid.Parse(event.UserID); err != nil {
-		log.Printf("events: payload inválido en %q (user_id %q no es un UUID), event_id=%s, descartando mensaje", routingKey, event.UserID, event.EventID)
+		logging.Warnf("events: payload inválido en %q (user_id %q no es un UUID), event_id=%s, descartando mensaje", routingKey, event.UserID, event.EventID)
 		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalid, Err: err})
 		return false
 	}
 
 	result, err := c.applier.ApplySuspension(ctx, event.UserID, suspend, event.OccurredAt.UTC(), event.Version)
 	if err != nil {
-		log.Printf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, event.EventID, err)
+		logging.Errorf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, event.EventID, err)
 		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusPending, Err: err})
 		return true
 	}
 
 	switch result {
 	case repository.SuspensionUserNotFound:
-		log.Printf("events: %q event_id=%s para un user_id inexistente (%s), no se crea nada", routingKey, event.EventID, event.UserID)
+		logging.Warnf("events: %q event_id=%s para un user_id inexistente (%s), no se crea nada", routingKey, event.EventID, event.UserID)
 		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedUnknownUser})
 	case repository.SuspensionStale:
-		log.Printf("events: %q event_id=%s user_id=%s version=%d ya aplicada o más vieja, sin cambios", routingKey, event.EventID, event.UserID, event.Version)
+		logging.Debugf("events: %q event_id=%s user_id=%s version=%d ya aplicada o más vieja, sin cambios", routingKey, event.EventID, event.UserID, event.Version)
 		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
 	default:
-		log.Printf("events: procesado %q event_id=%s user_id=%s version=%d", routingKey, event.EventID, event.UserID, event.Version)
+		logging.Infof("events: procesado %q event_id=%s user_id=%s version=%d", routingKey, event.EventID, event.UserID, event.Version)
 		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
 		if c.onApplied != nil {
 			c.onApplied(event.UserID)

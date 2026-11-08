@@ -6,8 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/discordia-grupo01/identify-service/internal/logging"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 // Publisher publica un evento y devuelve error si no llegó al broker, para
@@ -51,7 +58,7 @@ func (p *Poller) Drain(ctx context.Context) {
 	for i := 0; i < batchSize; i++ {
 		published, err := p.publishOne(ctx)
 		if err != nil {
-			log.Printf("outbox: fallo el tick del poller: %v", err)
+			logging.Errorf("outbox: fallo el tick del poller: %v", err)
 			return
 		}
 		if !published {
@@ -74,13 +81,14 @@ func (p *Poller) publishOne(ctx context.Context) (published bool, err error) {
 
 	var id, routingKey string
 	var payload []byte
+	var traceparent sql.NullString
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, routing_key, payload
+		SELECT id, routing_key, payload, traceparent
 		  FROM outbox_events
 		 WHERE published_at IS NULL
 		 ORDER BY created_at
 		 LIMIT 1
-		   FOR UPDATE SKIP LOCKED`).Scan(&id, &routingKey, &payload)
+		   FOR UPDATE SKIP LOCKED`).Scan(&id, &routingKey, &payload, &traceparent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -88,8 +96,22 @@ func (p *Poller) publishOne(ctx context.Context) (published bool, err error) {
 		return false, fmt.Errorf("select pending event: %w", err)
 	}
 
-	if pubErr := p.publisher.Publish(ctx, routingKey, json.RawMessage(payload)); pubErr != nil {
-		log.Printf("outbox: no se pudo publicar %q (id=%s), se reintenta en el próximo tick: %v", routingKey, id, pubErr)
+	publishCtx := telemetry.ContextWithTraceparent(ctx, traceparent.String)
+	publishCtx, span := otel.Tracer("github.com/discordia-grupo01/identify-service").Start(publishCtx, "outbox publish "+routingKey,
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.destination.name", routingKey),
+		),
+	)
+	pubErr := p.publisher.Publish(publishCtx, routingKey, json.RawMessage(payload))
+	if pubErr != nil {
+		span.SetStatus(codes.Error, "publish failed")
+	}
+	span.End()
+
+	if pubErr != nil {
+		logging.Warnf("outbox: no se pudo publicar %q (id=%s), se reintenta en el próximo tick: %v", routingKey, id, pubErr)
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE outbox_events SET attempts = attempts + 1, last_error = $2 WHERE id = $1`,
 			id, pubErr.Error(),

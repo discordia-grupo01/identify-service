@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/discordia-grupo01/identify-service/internal/logging"
+	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
 
 func initDB() *sql.DB {
@@ -26,9 +28,9 @@ func initDB() *sql.DB {
 		dsn += fmt.Sprintf(" options='-c search_path=%s'", dbSchema)
 	}
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := telemetry.OpenSQL("postgres", dsn)
 	if err != nil {
-		log.Fatalf("Error crítico al abrir driver de Postgres: %v", err)
+		logging.Fatalf("Error crítico al abrir driver de Postgres: %v", err)
 	}
 
 	// Configuración del pool de conexiones
@@ -41,13 +43,13 @@ func initDB() *sql.DB {
 	for i := 1; i <= 5; i++ {
 		pingErr = db.Ping()
 		if pingErr == nil {
-			log.Println("Conexión exitosa a PostgreSQL")
+			logging.Infof("Conexión exitosa a PostgreSQL")
 			return db
 		}
-		log.Printf("Esperando a PostgreSQL (intento %d/5)... error: %v", i, pingErr)
+		logging.Warnf("Esperando a PostgreSQL (intento %d/5)... error: %v", i, pingErr)
 		time.Sleep(2 * time.Second)
 	}
 
-	log.Fatalf("No se pudo conectar a PostgreSQL tras 5 intentos: %v", pingErr)
+	logging.Fatalf("No se pudo conectar a PostgreSQL tras 5 intentos: %v", pingErr)
 	return nil
 }
