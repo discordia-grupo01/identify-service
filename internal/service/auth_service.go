@@ -33,17 +33,30 @@ var (
 	ErrAccountSuspended      = model.ErrAccountSuspended
 )
 
+// LoginRateLimitError preserves the public sentinel while allowing the HTTP
+// layer to return a useful Retry-After value.
+type LoginRateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *LoginRateLimitError) Error() string { return ErrLoginAttemptsExceeded.Error() }
+func (e *LoginRateLimitError) Unwrap() error { return ErrLoginAttemptsExceeded }
+
 const (
 	AccessTokenTTL  = 15 * time.Minute
 	RefreshTokenTTL = 24 * 30 * time.Hour
 	jwtIssuer       = "discordia-issuer"
 
-	// Se cuenta por (email, ip) y no solo por email: bloquear la cuenta
-	// entera dejaria que cualquiera que sepa tu correo te saque de tu propia
-	// cuenta a proposito, sin necesidad de saber tu contrasena. Alguien que
-	// no comparte tu red solo se frena a si mismo.
-	loginAttemptWindow = 15 * time.Minute
-	maxLoginAttempts   = 5
+	loginPairWindow       = 15 * time.Minute
+	loginEmailWindow      = time.Hour
+	loginIPWindow         = 15 * time.Minute
+	maxLoginPairAttempts  = 5
+	maxLoginEmailAttempts = 20
+	maxLoginIPAttempts    = 100
+	maxLoginAttempts      = maxLoginPairAttempts
+	loginBackoffAfter     = 3
+	loginBackoffBase      = 250 * time.Millisecond
+	loginBackoffMax       = 2 * time.Second
 )
 
 type AuthService interface {
@@ -156,12 +169,28 @@ func (s *authService) Register(ctx context.Context, req model.RegisterRequest) (
 
 func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model.LoginResult, error) {
 	if s.loginAttempts != nil {
-		count, err := s.loginAttempts.CountRecentFailures(ctx, req.Email, req.IP, time.Now().UTC().Add(-loginAttemptWindow))
+		now := time.Now().UTC()
+		counts, err := s.loginAttempts.CountRecentFailures(ctx, req.Email, req.IP, now.Add(-loginPairWindow), now.Add(-loginEmailWindow))
 		if err != nil {
 			return nil, err
 		}
-		if count >= maxLoginAttempts {
-			return nil, ErrLoginAttemptsExceeded
+		if counts.EmailIP >= maxLoginPairAttempts {
+			return nil, &LoginRateLimitError{RetryAfter: loginPairWindow}
+		}
+		if counts.Email >= maxLoginEmailAttempts {
+			return nil, &LoginRateLimitError{RetryAfter: loginEmailWindow}
+		}
+		if counts.IP >= maxLoginIPAttempts {
+			return nil, &LoginRateLimitError{RetryAfter: loginIPWindow}
+		}
+		if delay := loginBackoff(counts.EmailIP); delay > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 
@@ -171,10 +200,13 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 	}
 	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
 		if s.loginAttempts != nil {
-			_ = s.loginAttempts.RecordFailure(ctx, req.Email, req.IP)
+			if err := s.loginAttempts.RecordFailure(ctx, req.Email, req.IP); err != nil {
+				return nil, err
+			}
 		}
 		return nil, ErrInvalidCredentials
 	}
+
 	if s.loginAttempts != nil {
 		_ = s.loginAttempts.ClearFailures(ctx, req.Email, req.IP)
 	}
@@ -206,6 +238,20 @@ func (s *authService) Login(ctx context.Context, req model.LoginRequest) (*model
 		return nil, err
 	}
 	return &model.LoginResult{Auth: auth}, nil
+}
+
+func loginBackoff(failures int) time.Duration {
+	if failures < loginBackoffAfter {
+		return 0
+	}
+	delay := loginBackoffBase
+	for i := loginBackoffAfter; i < failures; i++ {
+		delay *= 2
+		if delay >= loginBackoffMax {
+			return loginBackoffMax
+		}
+	}
+	return delay
 }
 
 func (s *authService) SetPassword(ctx context.Context, userID string, password string) error {
