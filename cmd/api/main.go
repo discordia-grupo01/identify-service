@@ -38,6 +38,7 @@ import (
 // @description                 Type "Bearer" followed by a space and the JWT.
 func main() {
 	logging.MustSetup("identify-service")
+	defer logging.Flush()
 
 	environment := getEnv("ENVIRONMENT", "development")
 	host := getEnv("HOST", "0.0.0.0")
