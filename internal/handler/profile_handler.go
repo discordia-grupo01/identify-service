@@ -123,7 +123,7 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        name         formData  string  false  "New display name"
 // @Param        description  formData  string  false  "New description"
-// @Param        image        formData  file    false  "New profile image"
+// @Param        image        formData  file    false  "New profile image (JPEG, PNG, WebP or GIF, up to 5 MiB)"
 // @Param        remove_image formData  boolean false  "Remove the current profile image"
 // @Success      200  {object}  model.UserResponse
 // @Failure      400  {object}  model.ErrorResponse  "invalid name/description/image"

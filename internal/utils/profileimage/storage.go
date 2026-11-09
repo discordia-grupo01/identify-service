@@ -28,12 +28,13 @@ func imageExtension(contentType string) (string, bool) {
 	extension, ok := map[string]string{
 		"image/jpeg": ".jpg",
 		"image/png":  ".png",
+		"image/webp": ".webp",
 		"image/gif":  ".gif",
 	}[contentType]
 	return extension, ok
 }
 
-var profileImageExtensions = []string{".jpg", ".png", ".gif"}
+var profileImageExtensions = []string{".jpg", ".png", ".webp", ".gif"}
 
 const versionParam = "v"
 
