@@ -14,7 +14,7 @@ run:
 	go run ./cmd/api
 
 test:
-	go test ./... -coverpkg=./internal/... -cover
+	go test ./... -p 1 -coverpkg=./internal/... -cover
 
 build:
 	go build -o bin/api ./cmd/api

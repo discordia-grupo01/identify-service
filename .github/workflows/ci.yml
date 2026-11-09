@@ -72,7 +72,10 @@ jobs:
       - name: Migrar la base de test
         run: migrate -path=migrations -database "postgres://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST:$DATABASE_PORT/$DATABASE_NAME?sslmode=$DATABASE_SSLMODE" up
       - name: Tests (con cobertura)
-        run: go test ./... -coverpkg=./internal/... -coverprofile=coverage.out
+        # -p 1: internal/outbox y test/e2e usan la misma base, y los e2e vacían
+        # outbox_events (TRUNCATE) entre tests. En paralelo, borraban el evento
+        # que el test del outbox estaba esperando y el build fallaba al azar.
+        run: go test ./... -p 1 -coverpkg=./internal/... -coverprofile=coverage.out
       - name: Verificar cobertura minima (70%)
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
