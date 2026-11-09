@@ -14,7 +14,7 @@ run:
 	go run ./cmd/api
 
 test:
-	go test ./... -coverpkg=./internal/... -cover
+	go test ./... -p 1 -coverpkg=./internal/... -cover
 
 # Mutation testing de internal/service con gremlins (ver docs/mutation-testing).
 # Tarda unos 10 minutos (los tests usan bcrypt); no corre en el CI.

@@ -170,3 +170,30 @@ func TestPollerPublishesEventsThatHaveNoTrace(t *testing.T) {
 		t.Fatal("el poller no publicó un evento sin traza")
 	}
 }
+
+type countingPublisher struct {
+	count *int
+}
+
+func (p countingPublisher) Publish(_ context.Context, routingKey string, _ any) error {
+	if routingKey == "identity.test_backlog" {
+		*p.count++
+	}
+	return nil
+}
+
+// Una vuelta publica todo lo atrasado, no solo los primeros 20: con ese tope,
+// el servicio entero quedaba en 10 eventos por segundo.
+func TestDrainPublishesTheWholeBacklog(t *testing.T) {
+	db := newDB(t)
+	const backlog = 50
+	for i := 0; i < backlog; i++ {
+		insert(t, db, context.Background(), "identity.test_backlog")
+	}
+
+	var published int
+	outbox.NewPoller(db, countingPublisher{count: &published}).Drain(context.Background())
+	if published != backlog {
+		t.Errorf("una vuelta publicó %d de %d eventos pendientes", published, backlog)
+	}
+}
