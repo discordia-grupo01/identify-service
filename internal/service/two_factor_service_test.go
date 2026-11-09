@@ -804,3 +804,33 @@ func TestDisableRejectsAnAccountWithoutAPassword(t *testing.T) {
 		t.Fatalf("Disable() error = %v, want ErrPasswordMismatch", err)
 	}
 }
+
+// The attempts cap is checked before the code, too: a challenge that reached
+// it without being burned (two requests at once) doesn't get another try,
+// not even with the right code.
+func TestVerifyLoginRejectsAChallengeAtTheAttemptsCap(t *testing.T) {
+	fixture := newTwoFactorFixture(t)
+	fixture.activate(t)
+	challengeToken := fixture.startChallenge(t)
+	for _, challenge := range fixture.repo.challenges {
+		challenge.Attempts = maxChallengeAttempts
+	}
+
+	_, err := fixture.service.VerifyLogin(context.Background(), model.TwoFactorVerifyRequest{
+		ChallengeToken: challengeToken,
+		Code:           fixture.codeNow(t),
+	})
+	if !errors.Is(err, ErrTwoFactorTooManyAttempts) {
+		t.Fatalf("VerifyLogin() error = %v, want ErrTwoFactorTooManyAttempts", err)
+	}
+}
+
+func TestDisableRejectsAPasswordForAnUnknownUser(t *testing.T) {
+	fixture := newTwoFactorFixture(t)
+	fixture.activate(t)
+	fixture.userRepo.existingUser = nil
+
+	if err := fixture.service.DisableWithPassword(context.Background(), testUserID, testPassword); !errors.Is(err, ErrPasswordMismatch) {
+		t.Fatalf("DisableWithPassword() error = %v, want ErrPasswordMismatch", err)
+	}
+}
