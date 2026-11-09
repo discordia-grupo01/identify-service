@@ -34,7 +34,7 @@ func TestLocalStorageUsesContentTypeExtensions(t *testing.T) {
 	tests := map[string]string{
 		"image/jpeg": ".jpg",
 		"image/png":  ".png",
-		"image/gif":  ".gif",
+		"image/webp": ".webp",
 	}
 	for contentType, extension := range tests {
 		t.Run(contentType, func(t *testing.T) {
@@ -70,9 +70,23 @@ func TestLocalStorageSaveRemovesPreviousImageFormat(t *testing.T) {
 	}
 }
 
+func TestLocalStorageSaveRemovesAPreviousWebPImage(t *testing.T) {
+	storage := NewLocalStorage(t.TempDir(), "/images")
+	if _, err := storage.Save(context.Background(), "user-id", []byte("webp"), "image/webp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Save(context.Background(), "user-id", []byte("png"), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(storage.directory, "user-id.webp")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old webp image still exists or unexpected error: %v", err)
+	}
+}
+
 func TestLocalStorageRejectsUnsupportedContentType(t *testing.T) {
 	storage := NewLocalStorage(t.TempDir(), "/images")
-	_, err := storage.Save(context.Background(), "user-id", []byte("data"), "image/webp")
+	_, err := storage.Save(context.Background(), "user-id", []byte("data"), "image/bmp")
 	if err == nil || !strings.Contains(err.Error(), "unsupported image content type") {
 		t.Fatalf("Save() error = %v, want unsupported content type error", err)
 	}

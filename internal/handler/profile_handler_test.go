@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
@@ -334,6 +335,23 @@ func TestProfileHandlerUpdatesProfileFromMultipartRequest(t *testing.T) {
 	decodeProfileJSON(t, recorder, &response)
 	if response.AvatarURL != "/uploads/user-id.png" {
 		t.Fatalf("avatar URL = %q", response.AvatarURL)
+	}
+}
+
+func TestProfileHandlerDetectsAWebPUpload(t *testing.T) {
+	serviceStub := &profileServiceStub{response: &model.UserResponse{ID: "user-id", Name: "Ada Lovelace"}}
+	data, err := base64.StdEncoding.DecodeString("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+
+	recorder := performProfileRequest(t, serviceStub, "user-id", "Ada Lovelace", "", data)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !serviceStub.request.ImageProvided || serviceStub.request.ImageContentType != "image/webp" || len(serviceStub.request.Image) == 0 {
+		t.Fatalf("service did not receive the uploaded WebP: provided=%v type=%q", serviceStub.request.ImageProvided, serviceStub.request.ImageContentType)
 	}
 }
 

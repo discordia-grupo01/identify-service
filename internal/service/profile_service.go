@@ -5,13 +5,14 @@ import (
 	"context"
 	"errors"
 	"image"
-	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"net/http"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	_ "golang.org/x/image/webp"
 
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
@@ -30,7 +31,7 @@ const (
 var (
 	ErrInvalidProfileName        = errors.New("el nombre contiene caracteres inválidos o supera los 100 caracteres")
 	ErrInvalidProfileDescription = errors.New("la descripción contiene caracteres inválidos o supera los 500 caracteres")
-	ErrInvalidProfileImage       = errors.New("la imagen debe ser JPEG, PNG o GIF, pesar hasta 5 MiB y tener dimensiones válidas")
+	ErrInvalidProfileImage       = errors.New("la imagen debe ser JPEG, PNG o WebP, pesar hasta 5 MiB y tener dimensiones válidas")
 	ErrUserNotFound              = errors.New("el usuario no existe")
 	ErrNoStatusChanges           = errors.New("no hay cambios para guardar")
 	ErrInvalidStatusText         = errors.New("el texto del estado contiene caracteres de control o supera los 64 caracteres")
@@ -259,7 +260,7 @@ func validateProfileImage(data []byte) (string, error) {
 		return "", ErrInvalidProfileImage
 	}
 	contentType := http.DetectContentType(data)
-	if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/gif" {
+	if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/webp" {
 		return "", ErrInvalidProfileImage
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))

@@ -491,7 +491,7 @@ paths:
                   description: New description
                   type: string
                 image:
-                  description: New profile image
+                  description: New profile image (JPEG, PNG or WebP, up to 5 MiB)
                   type: string
                   format: binary
                 remove_image:
