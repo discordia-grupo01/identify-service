@@ -3,10 +3,12 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"image"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,18 +16,20 @@ import (
 )
 
 type profileImageStorageStub struct {
-	url       string
-	data      []byte
-	deleteErr error
-	saveErr   error
-	deleted   string
+	url         string
+	data        []byte
+	contentType string
+	deleteErr   error
+	saveErr     error
+	deleted     string
 }
 
-func (s *profileImageStorageStub) Save(_ context.Context, _ string, data []byte, _ string) (string, error) {
+func (s *profileImageStorageStub) Save(_ context.Context, _ string, data []byte, contentType string) (string, error) {
 	if s.saveErr != nil {
 		return "", s.saveErr
 	}
 	s.data = data
+	s.contentType = contentType
 	return s.url, nil
 }
 
@@ -191,6 +195,51 @@ func TestProfileServicePropagatesRepositoryAndStorageErrors(t *testing.T) {
 			t.Fatalf("new avatar = %q, want cleanup after persistence failure", storage.deleted)
 		}
 	})
+}
+
+func TestProfileServiceAcceptsAWebPAvatar(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	storage := &profileImageStorageStub{}
+	_, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Image: validWebP(t), ImageContentType: "image/webp", ImageProvided: true,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if storage.contentType != "image/webp" {
+		t.Fatalf("saved content type = %q, want image/webp", storage.contentType)
+	}
+}
+
+func TestProfileServiceRejectsAWebPThatIsNotAnImage(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	storage := &profileImageStorageStub{}
+	fake := append([]byte("RIFF\x10\x00\x00\x00WEBPVP8 "), []byte("not really webp")...)
+	_, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Image: fake, ImageContentType: "image/webp", ImageProvided: true,
+	})
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+}
+
+func TestProfileServiceRejectsAWebPDeclaredAsAnotherType(t *testing.T) {
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	storage := &profileImageStorageStub{}
+	_, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Image: validWebP(t), ImageContentType: "image/png", ImageProvided: true,
+	})
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+}
+
+func TestProfileServiceErrorNamesTheAcceptedFormats(t *testing.T) {
+	for _, format := range []string{"JPEG", "PNG", "WebP", "GIF", "5 MiB"} {
+		if !strings.Contains(ErrInvalidProfileImage.Error(), format) {
+			t.Fatalf("the error %q should mention %s", ErrInvalidProfileImage.Error(), format)
+		}
+	}
 }
 
 func TestProfileServiceRejectsMismatchedImageContentType(t *testing.T) {
@@ -553,6 +602,15 @@ func validPNG(t *testing.T) []byte {
 		t.Fatalf("png.Encode() error = %v", err)
 	}
 	return buffer.Bytes()
+}
+
+func validWebP(t *testing.T) []byte {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	return data
 }
 
 func stringPointer(value string) *string {
