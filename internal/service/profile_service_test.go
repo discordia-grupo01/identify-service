@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/png"
 	"strings"
 	"testing"
@@ -234,8 +235,26 @@ func TestProfileServiceRejectsAWebPDeclaredAsAnotherType(t *testing.T) {
 	}
 }
 
+func TestProfileServiceRejectsAGIFAvatar(t *testing.T) {
+	var buffer bytes.Buffer
+	if err := gif.Encode(&buffer, image.NewPaletted(image.Rect(0, 0, 2, 2), color.Palette{color.Black, color.White}), nil); err != nil {
+		t.Fatalf("gif.Encode() error = %v", err)
+	}
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
+	storage := &profileImageStorageStub{}
+	_, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{
+		Image: buffer.Bytes(), ImageContentType: "image/gif", ImageProvided: true,
+	})
+	if !errors.Is(err, ErrInvalidProfileImage) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidProfileImage)
+	}
+	if storage.data != nil {
+		t.Fatal("a GIF avatar must not reach the storage")
+	}
+}
+
 func TestProfileServiceErrorNamesTheAcceptedFormats(t *testing.T) {
-	for _, format := range []string{"JPEG", "PNG", "WebP", "GIF", "5 MiB"} {
+	for _, format := range []string{"JPEG", "PNG", "WebP", "5 MiB"} {
 		if !strings.Contains(ErrInvalidProfileImage.Error(), format) {
 			t.Fatalf("the error %q should mention %s", ErrInvalidProfileImage.Error(), format)
 		}

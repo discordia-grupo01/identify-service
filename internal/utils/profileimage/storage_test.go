@@ -35,7 +35,6 @@ func TestLocalStorageUsesContentTypeExtensions(t *testing.T) {
 		"image/jpeg": ".jpg",
 		"image/png":  ".png",
 		"image/webp": ".webp",
-		"image/gif":  ".gif",
 	}
 	for contentType, extension := range tests {
 		t.Run(contentType, func(t *testing.T) {
