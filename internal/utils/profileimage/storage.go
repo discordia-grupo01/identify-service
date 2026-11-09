@@ -29,7 +29,6 @@ func imageExtension(contentType string) (string, bool) {
 		"image/jpeg": ".jpg",
 		"image/png":  ".png",
 		"image/webp": ".webp",
-		"image/gif":  ".gif",
 	}[contentType]
 	return extension, ok
 }
