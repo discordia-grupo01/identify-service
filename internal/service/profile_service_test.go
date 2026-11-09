@@ -650,3 +650,76 @@ func TestProfileServiceDoesNotDeleteReplacedAvatarOfSameObject(t *testing.T) {
 		t.Fatalf("AvatarURL = %q, want %q", response.AvatarURL, storage.url)
 	}
 }
+
+// Exactly the limit is accepted, one more is rejected. Text limits count
+// characters, not bytes; the emoji limit counts bytes.
+func TestProfileTextLimits(t *testing.T) {
+	check := func(name string, normalize func(string) (string, error), atLimit, overLimit string) {
+		t.Helper()
+		if _, err := normalize(atLimit); err != nil {
+			t.Errorf("%s at the limit: %v", name, err)
+		}
+		if _, err := normalize(overLimit); err == nil {
+			t.Errorf("%s over the limit should be rejected", name)
+		}
+		if _, err := normalize("\xff"); err == nil {
+			t.Errorf("%s with invalid UTF-8 should be rejected", name)
+		}
+	}
+	check("description", normalizeDescription, strings.Repeat("á", MaxDescriptionRunes), strings.Repeat("á", MaxDescriptionRunes+1))
+	check("status text", normalizeStatusText, strings.Repeat("á", MaxStatusTextRunes), strings.Repeat("á", MaxStatusTextRunes+1))
+	check("status emoji", normalizeStatusEmoji, strings.Repeat("a", MaxStatusEmojiBytes), strings.Repeat("a", MaxStatusEmojiBytes+1))
+}
+
+func pngOfSize(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewGray(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatalf("png.Encode() error = %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func TestValidateProfileImageLimits(t *testing.T) {
+	// Padding after the PNG's end doesn't change how it decodes, so it makes
+	// a file of any size.
+	padded := func(size int) []byte {
+		data := validPNG(t)
+		return append(data, make([]byte, size-len(data))...)
+	}
+	cases := map[string]struct {
+		data   []byte
+		wantOK bool
+	}{
+		"empty":                  {data: nil},
+		"exactly the max bytes":  {data: padded(MaxProfileImageBytes), wantOK: true},
+		"one byte over":          {data: padded(MaxProfileImageBytes + 1)},
+		"1x1":                    {data: pngOfSize(t, 1, 1), wantOK: true},
+		"exactly the max width":  {data: pngOfSize(t, MaxProfileImageSide, 1), wantOK: true},
+		"exactly the max height": {data: pngOfSize(t, 1, MaxProfileImageSide), wantOK: true},
+		"one pixel too wide":     {data: pngOfSize(t, MaxProfileImageSide+1, 1)},
+		"one pixel too tall":     {data: pngOfSize(t, 1, MaxProfileImageSide+1)},
+	}
+	for name, tc := range cases {
+		_, err := validateProfileImage(tc.data)
+		if (err == nil) != tc.wantOK {
+			t.Errorf("%s: err = %v, want ok = %v", name, err, tc.wantOK)
+		}
+	}
+}
+
+// If saving the profile fails, only an image uploaded in this same request is
+// cleaned up: the avatar the user already had must stay.
+func TestProfileServiceKeepsTheCurrentAvatarWhenSavingFails(t *testing.T) {
+	databaseErr := errors.New("database unavailable")
+	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada", AvatarURL: "/old.png"}, updateErr: databaseErr}
+	storage := &profileImageStorageStub{}
+
+	_, err := NewProfileService(repo, storage, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{Name: stringPointer("Grace")})
+	if !errors.Is(err, databaseErr) {
+		t.Fatalf("Update() error = %v, want %v", err, databaseErr)
+	}
+	if storage.deleted != "" {
+		t.Fatalf("deleted %q, want the current avatar kept", storage.deleted)
+	}
+}

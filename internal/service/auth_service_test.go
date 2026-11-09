@@ -111,10 +111,12 @@ func (r *userRepositoryStub) UpdateStatus(_ context.Context, _ string, statusTex
 }
 
 type loginAttemptRepositoryStub struct {
-	failures   map[string]int
-	countErr   error
-	recordErr  error
-	clearCalls int
+	failures map[string]int
+	// The windows the last count asked for.
+	pairSince, emailSince time.Time
+	countErr              error
+	recordErr             error
+	clearCalls            int
 }
 
 func newLoginAttemptRepositoryStub() *loginAttemptRepositoryStub {
@@ -125,7 +127,8 @@ var _ repository.LoginAttemptRepository = (*loginAttemptRepositoryStub)(nil)
 
 func loginAttemptKey(email, ip string) string { return email + "|" + ip }
 
-func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, _ time.Time, _ time.Time) (repository.LoginAttemptCounts, error) {
+func (r *loginAttemptRepositoryStub) CountRecentFailures(_ context.Context, email string, ip string, pairSince time.Time, emailSince time.Time) (repository.LoginAttemptCounts, error) {
+	r.pairSince, r.emailSince = pairSince, emailSince
 	if r.countErr != nil {
 		return repository.LoginAttemptCounts{}, r.countErr
 	}
@@ -1084,5 +1087,14 @@ func TestAuthServiceRegisterPassesReturnToTheConfirmationEmail(t *testing.T) {
 	want := model.EmailConfirmationRequest{Email: "ada@example.com", ReturnTo: model.ReturnToApp}
 	if len(requester.requests) != 1 || requester.requests[0] != want {
 		t.Fatalf("confirmation requests = %+v, want [%+v]", requester.requests, want)
+	}
+}
+
+func TestValidatePasswordMinimumLength(t *testing.T) {
+	if !validatePassword("Abcdefg1") {
+		t.Error("a password of exactly 8 characters must be accepted")
+	}
+	if validatePassword("Abcdef1") {
+		t.Error("a password of 7 characters must be rejected")
 	}
 }
