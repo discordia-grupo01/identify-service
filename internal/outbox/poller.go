@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/discordia-grupo01/events-contract/validate"
 	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
@@ -97,6 +98,10 @@ func (p *Poller) publishOne(ctx context.Context) (published bool, err error) {
 	}
 	if err != nil {
 		return false, fmt.Errorf("select pending event: %w", err)
+	}
+
+	if err := validate.Validate(routingKey, payload); err != nil && !errors.Is(err, validate.ErrUnknownEvent) {
+		logging.Warnf("outbox: %q (id=%s) no cumple el contrato de eventos: %v", routingKey, id, err)
 	}
 
 	publishCtx := telemetry.ContextWithTraceparent(ctx, traceparent.String)
