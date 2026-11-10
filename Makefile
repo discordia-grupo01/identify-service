@@ -1,4 +1,4 @@
-.PHONY: run test build migrate openapi
+.PHONY: run test mutation build migrate openapi
 
 -include .env
 export
@@ -14,7 +14,15 @@ run:
 	go run ./cmd/api
 
 test:
-	go test ./... -coverpkg=./internal/... -cover
+	go test ./... -p 1 -coverpkg=./internal/... -cover
+
+# Mutation testing de internal/service con gremlins (ver docs/mutation-testing).
+# Tarda unos 10 minutos (los tests usan bcrypt); no corre en el CI.
+mutation:
+	go clean -testcache
+	gremlins unleash ./internal/service --timeout-coefficient 5 --workers 6 \
+		--invert-assignments --invert-logical --invert-loopctrl --remove-self-assignments \
+		--invert-bitwise --invert-bwassign --output docs/mutation-testing/after.json
 
 build:
 	go build -o bin/api ./cmd/api

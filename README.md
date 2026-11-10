@@ -105,7 +105,7 @@ identify-service/
 
 ## Comandos (Makefile)
 - `make run` - corre el servicio localmente (`go run ./cmd/api`).
-- `make test` - corre los tests con cobertura (`go test ./... -coverpkg=./internal/... -cover`). El `-coverpkg` es necesario porque `test/e2e` ejercita `internal/repository` a traves del router real: sin el, esos paquetes aparecen en 0% aunque esten cubiertos.
+- `make test` - corre los tests con cobertura (`go test ./... -p 1 -coverpkg=./internal/... -cover`). El `-coverpkg` es necesario porque `test/e2e` ejercita `internal/repository` a traves del router real: sin el, esos paquetes aparecen en 0% aunque esten cubiertos. El `-p 1` corre un paquete a la vez: `internal/outbox` y `test/e2e` usan la misma base y los e2e vacian `outbox_events` entre tests, asi que en paralelo se pisan.
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - corre las migraciones (golang-migrate) contra la BDD que indique `.env` (local o Supabase).
 - `make openapi` - regenera `openapi.yaml` desde las anotaciones swag de los handlers (`internal/handler/**`). Necesita Go y Node. No hace falta correrlo a mano: el CI lo corre en cada push/PR y, si detecta que cambió, commitea `openapi.yaml` solo de vuelta a la rama.

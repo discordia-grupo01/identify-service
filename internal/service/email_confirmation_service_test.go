@@ -20,6 +20,7 @@ type emailConfirmationRepositoryStub struct {
 	getErr        error
 	markUsedErr   error
 	count         int
+	countSince    time.Time
 	countErr      error
 	invalidated   bool
 	invalidateErr error
@@ -50,8 +51,9 @@ func (r *emailConfirmationRepositoryStub) Create(_ context.Context, confirmation
 func (r *emailConfirmationRepositoryStub) CountRecentByEmail(
 	_ context.Context,
 	_ string,
-	_ time.Time,
+	since time.Time,
 ) (int, error) {
+	r.countSince = since
 	return r.count, r.countErr
 }
 
@@ -536,5 +538,34 @@ func TestEmailConfirmationAppURLCanBeConfigured(t *testing.T) {
 
 	if got := appConfirmationBaseURL("https://example.com/confirm"); got != "https://app.example.com/abrir" {
 		t.Fatalf("appConfirmationBaseURL() = %q", got)
+	}
+}
+
+// The limit counts the requests of the last hour: one under the limit can
+// still ask for another email, reaching it can't.
+func TestEmailConfirmationServiceRequestLimitBoundary(t *testing.T) {
+	cases := map[string]struct {
+		count   int
+		wantErr error
+	}{
+		"one under the limit": {count: defaultConfirmationLimit - 1},
+		"at the limit":        {count: defaultConfirmationLimit, wantErr: ErrEmailConfirmationRateLimited},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := newEmailConfirmationRepositoryStub()
+			repo.count = tc.count
+			user := &model.User{ID: "user-1", Email: "ada@example.com"}
+			service := NewEmailConfirmationService(repo, &userRepositoryStub{existingUser: user}, &emailConfirmationMailerStub{}, "https://example.com/confirm")
+
+			before := time.Now().UTC()
+			err := service.RequestEmailConfirmation(context.Background(), model.EmailConfirmationRequest{Email: user.Email})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("RequestEmailConfirmation() error = %v, want %v", err, tc.wantErr)
+			}
+			if repo.countSince.Before(before.Add(-emailConfirmationWindow-time.Second)) || repo.countSince.After(before.Add(-emailConfirmationWindow+time.Second)) {
+				t.Errorf("counted requests since %v, want %v before now", repo.countSince, emailConfirmationWindow)
+			}
+		})
 	}
 }

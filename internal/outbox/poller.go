@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/discordia-grupo01/events-contract/validate"
 	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/telemetry"
 )
@@ -25,7 +26,10 @@ type Publisher interface {
 
 const PollInterval = 2 * time.Second
 
-const batchSize = 20
+// maxPerTick acota cuántos eventos publica una vuelta. Si hay atrasados, el
+// poller sigue publicando en vez de esperar al próximo tick: con un tope de 20
+// por tick de 2s, todo el servicio quedaba limitado a 10 eventos por segundo.
+const maxPerTick = 2000
 
 type Poller struct {
 	db        *sql.DB
@@ -51,11 +55,11 @@ func (p *Poller) Start(ctx context.Context) {
 	}
 }
 
-// Drain publica hasta batchSize eventos pendientes, del más viejo al más
+// Drain publica hasta maxPerTick eventos pendientes, del más viejo al más
 // nuevo. Frena en el primer error de base; un error del broker solo deja ese
 // evento pendiente (con attempts y last_error) y sigue con el próximo tick.
 func (p *Poller) Drain(ctx context.Context) {
-	for i := 0; i < batchSize; i++ {
+	for i := 0; i < maxPerTick && ctx.Err() == nil; i++ {
 		published, err := p.publishOne(ctx)
 		if err != nil {
 			logging.Errorf("outbox: fallo el tick del poller: %v", err)
@@ -94,6 +98,10 @@ func (p *Poller) publishOne(ctx context.Context) (published bool, err error) {
 	}
 	if err != nil {
 		return false, fmt.Errorf("select pending event: %w", err)
+	}
+
+	if err := validate.Validate(routingKey, payload); err != nil && !errors.Is(err, validate.ErrUnknownEvent) {
+		logging.Warnf("outbox: %q (id=%s) no cumple el contrato de eventos: %v", routingKey, id, err)
 	}
 
 	publishCtx := telemetry.ContextWithTraceparent(ctx, traceparent.String)
