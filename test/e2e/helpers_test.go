@@ -84,6 +84,24 @@ func (m *e2ePasswordRecoveryMailer) latest(emailAddress string) (email.PasswordR
 	return messages[len(messages)-1], true
 }
 
+type e2eAccountRecoveryMailer struct {
+	mu   sync.Mutex
+	sent []email.AccountRecoveryResultRequest
+}
+
+func (m *e2eAccountRecoveryMailer) SendAccountRecoveryResultEmail(request email.AccountRecoveryResultRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, request)
+	return nil
+}
+
+func (m *e2eAccountRecoveryMailer) all() []email.AccountRecoveryResultRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]email.AccountRecoveryResultRequest(nil), m.sent...)
+}
+
 // fakeGoogleVerifier stands in for a real call to Google's JWKS endpoint:
 // e2e tests can't present a genuine Google-signed ID token, so they hand
 // this a claims-by-token map instead. An empty/unknown token is treated as
@@ -227,6 +245,16 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	)
 	passwordRecoveryHandler := handler.NewPasswordRecoveryHandler(passwordRecoveryService)
 
+	accountRecoveryMailer := &e2eAccountRecoveryMailer{}
+	accountRecoveryService := service.NewAccountRecoveryService(
+		repository.NewAccountRecoveryRepository(db),
+		repository.NewTwoFactorRepository(db),
+		userRepo,
+		accountRecoveryMailer,
+		"https://e2e.example.com/login",
+	)
+	accountRecoveryHandler := handler.NewAccountRecoveryHandler(accountRecoveryService)
+
 	api := router.Group("/v1")
 	{
 		api.POST("/users", authHandler.Register)
@@ -241,6 +269,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 		api.PUT("/me/status", middleware.RequireAuth(userRepo), profileHandler.UpdateStatus)
 		api.DELETE("/me/status", middleware.RequireAuth(userRepo), profileHandler.DeleteStatus)
 		api.POST("/login/2fa", twoFactorHandler.VerifyLogin)
+		api.POST("/login/2fa/recovery-request", accountRecoveryHandler.Create)
 		api.GET("/me/2fa", middleware.RequireAuth(userRepo), twoFactorHandler.Status)
 		api.POST("/me/2fa/setup", middleware.RequireAuth(userRepo), twoFactorHandler.Setup)
 		api.POST("/me/2fa/activate", middleware.RequireAuth(userRepo), twoFactorHandler.Activate)
@@ -255,6 +284,7 @@ func newTestRouter(t *testing.T, db *sql.DB) *gin.Engine {
 	e2eMailers.Store(router, confirmationMailer)
 	e2ePasswordMailers.Store(router, passwordRecoveryMailer)
 	e2eGoogleVerifiers.Store(router, googleVerifier)
+	e2eAccountRecovery.Store(router, accountRecoveryDeps{service: accountRecoveryService, mailer: accountRecoveryMailer})
 
 	return router
 }
@@ -263,7 +293,25 @@ var (
 	e2eMailers         sync.Map
 	e2ePasswordMailers sync.Map
 	e2eGoogleVerifiers sync.Map
+	e2eAccountRecovery sync.Map
 )
+
+type accountRecoveryDeps struct {
+	service service.AccountRecoveryService
+	mailer  *e2eAccountRecoveryMailer
+}
+
+// accountRecoveryFor devuelve el servicio que el router usa para las
+// solicitudes de recuperación, para enchufarlo al consumidor de admin, y el
+// mailer que captura los avisos.
+func accountRecoveryFor(t *testing.T, router *gin.Engine) accountRecoveryDeps {
+	t.Helper()
+	deps, ok := e2eAccountRecovery.Load(router)
+	if !ok {
+		t.Fatal("account recovery was not registered for test router")
+	}
+	return deps.(accountRecoveryDeps)
+}
 
 func confirmationMailerFor(t *testing.T, router *gin.Engine) *e2eConfirmationMailer {
 	t.Helper()

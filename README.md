@@ -44,6 +44,7 @@ make run
 | PASSWORD_RESET_EXPIRATION | 1h | Expiracion del enlace, limitada a una hora. |
 | PASSWORD_RESET_MAX_ATTEMPTS | 3 | Solicitudes permitidas por email en una hora. |
 | EMAIL_CONFIRMATION_URL | http://localhost:3000/confirm-email | URL base del frontend para confirmar el email de registro. |
+| LOGIN_URL | http://localhost:3000/login | Pantalla de login del frontend. Va en el botón "Iniciar sesión" del mail que avisa que el staff aprobó una recuperación de cuenta. |
 | EMAIL_CONFIRMATION_EXPIRATION | 24h | Expiracion del enlace de confirmacion. |
 | EMAIL_CONFIRMATION_MAX_ATTEMPTS | 3 | Solicitudes de confirmacion permitidas por email en una hora. |
 | PROFILE_IMAGE_DIR | ./storage/profile-images | Directorio local para imagenes de perfil. |
@@ -180,6 +181,7 @@ proximo `make migrate` la vuelva a intentar.
 - `POST /v1/users` - registro de usuario.
 - `POST /v1/login` - login. Requiere que el email este confirmado. Devuelve un access token (JWT, ~15 min) en el body y setea el refresh token (~30 dias) como cookie httpOnly; el refresh token nunca viaja en el body. **Si la cuenta tiene segundo factor activo, responde 202 (Accepted) en vez de 200**: trae `two_factor_required: true` + `challenge_token` y no setea cookie. El cliente sigue distinguiendo las dos respuestas por el campo `two_factor_required` (no por el código HTTP): el 202 solo existe para que la documentación de la API sea correcta. **429 (`LOGIN_ATTEMPTS_EXCEEDED`)** si hubo 5 intentos fallidos en los ultimos 15 minutos para esa combinacion de email + IP de origen -- se cuenta por (email, ip) y no por cuenta entera, para que nadie pueda bloquear la cuenta de otra persona solo sabiendo su email (ver `AuthService.Login` / `login_attempts`). Ademas, el gateway (Kong) limita `/v1/login` a 60 req/min por IP como proteccion adicional contra volumen.
 - `POST /v1/login/2fa` - segundo paso del login. Acepta tanto el codigo de 6 digitos de la app autenticadora como uno de los codigos de recuperacion de un solo uso (se distinguen por el formato). El desafio dura 5 minutos, se consume al primer codigo aceptado y se quema a los 5 intentos fallidos. Publico: quien lo llama todavia no tiene sesion.
+- `POST /v1/login/2fa/recovery-request` - pedido de recuperacion de cuenta para quien perdio la app autenticadora y todos los codigos de recuperacion. Recibe el `challenge_token` del paso de 2FA (de `/v1/login` o `/v1/oauth/google`, que prueba el primer factor) y un `message` opcional de hasta 500 caracteres. No consume el desafio. Responde `201` con `request_id`, `status: "pending"` y `email_hint` (el email enmascarado, para que el front muestre donde llega la respuesta); `409 ACCOUNT_RECOVERY_ALREADY_PENDING` si ya hay una pendiente; `401 TWO_FACTOR_CHALLENGE_EXPIRED` si el desafio vencio o no existe. La solicitud la resuelve el staff en `discordia-admin` (ver eventos).
 - `GET /v1/me/2fa` - estado del segundo factor de la cuenta (activo, pendiente de confirmar, codigos de recuperacion sin usar). Requiere Bearer JWT.
 - `POST /v1/me/2fa/setup` - genera el secreto TOTP y devuelve la URI `otpauth://` para que el cliente dibuje el QR (el backend no devuelve imagenes). No activa nada: el 2FA queda pendiente. Llamarlo dos veces devuelve el mismo secreto pendiente, para no invalidar un QR ya escaneado. Requiere Bearer JWT.
 - `POST /v1/me/2fa/activate` - confirma el QR con un codigo de la app, activa el 2FA y devuelve los codigos de recuperacion. Es la unica respuesta donde los codigos viajan en claro: despues solo queda su hash. Requiere Bearer JWT.
@@ -283,6 +285,14 @@ Para eliminar la foto de perfil, `PATCH /v1/me/profile` acepta
   - Deploy: `discordia-admin` va primero (enlaza `admin.users` a esta routing
     key); si identify publica antes, RabbitMQ descarta los eventos y hay que
     relanzar el backfill a mano.
+- `users.account_recovery_requested` (exchange `discordia.events`) - solicitud
+  de recuperacion de cuenta (`request_id`, `user_id`, `message`,
+  `requested_at`), en la misma transaccion que la crea (mismo outbox). Sin
+  email: admin ya lo tiene. La tabla `account_recovery_requests` admite una
+  sola pendiente por usuario (indice unico parcial), asi que no se publica un
+  segundo pedido mientras haya uno sin resolver.
+  - Deploy: igual que los anteriores, `discordia-admin` tiene que enlazar
+    `admin.users` a esta routing key antes de que identify publique.
 
 ## Eventos que consume
 - `servers.member_joined` / `servers.member_left` (exchange `discordia.events`, cola `identify.server_memberships`) - publicados por `discordia-servers` cuando un usuario se une/abandona un servidor. Se procesan de forma idempotente y tolerante a desorden (last-write-wins por `occurred_at`) para alimentar `mutual_server_ids` en `GET /v1/users/{id}`. Si `RABBITMQ_URL` no esta seteada, el consumer no se inicia y el resto del servicio sigue funcionando normalmente. Ver `PLANNING_RABBITMQ.md` para el contrato completo.
@@ -292,6 +302,10 @@ Para eliminar la foto de perfil, `PATCH /v1/me/profile` acepta
   - Un `user_id` inexistente se confirma y se audita (`discarded_unknown_user`) sin crear nada; un mensaje roto o con `user_id` que no es UUID se descarta (`discarded_malformed_payload` / `discarded_invalid_payload`). Solo una falla transitoria de la base se reencola (nack requeue).
   - **Efectos de una cuenta suspendida**: `403 ACCOUNT_SUSPENDED` en el login (contraseña, 2FA, Google y PIN), en `POST /v1/refresh` y en cualquier endpoint autenticado (`RequireAuth` consulta el estado en cada request, con una cache en memoria de 5 s que se invalida en el momento en que esta instancia aplica el evento: un access token vigente deja de servir). `GET /v1/users/{id}` de un suspendido devuelve `404`. No se borra nada de lo que el usuario hizo. Reactivarlo basta para que vuelva a entrar.
   - El motivo de la suspension no viaja en los eventos (minimizacion de datos).
+- `admin.account_recovery_approved` / `admin.account_recovery_rejected` (misma cola `identify.admin_events`) - publicados por `discordia-admin` cuando el staff resuelve una solicitud de recuperacion de cuenta. Firmados igual que los de suspension (firman `request_id` y `user_id`, asi que no se pueden mover a otra solicitud ni a otro usuario).
+  - Se aplican solo si la solicitud de ese usuario sigue pendiente; un duplicado es un no-op confirmado y no manda otro mail. Una solicitud inexistente se confirma y se audita como `discarded_invalid_payload`.
+  - **Aprobada**: en la misma transaccion que la marca, borra el 2FA del usuario (secreto, codigos de recuperacion y desafios abiertos); el proximo login entra sin segundo factor. **Rechazada**: solo la marca; el 2FA sigue igual y el usuario puede pedir otra.
+  - En los dos casos se le avisa al usuario por email despues del commit. Si el mail falla, la decision ya quedo aplicada: se loguea `warn` y el evento no se reencola.
 - `billing.premium_updated` (exchange `discordia.events`, cola durable `identify.billing_events`) - publicado por `discordia-billing` cada vez que cambia el Premium de un usuario (pago, renovacion, cancelacion, devolucion o vencimiento). Es una foto completa; identify solo guarda `active` en `users.premium_active` y lo muestra como `premium` en `GET /v1/me/profile` y `GET /v1/users/{id}`.
   - **Firma**: igual que los de admin, pero con `BILLING_EVENTS_HMAC_SECRET` (`Verify` de `events-contract/billing`). Un evento sin firma valida se descarta con ack y no cambia nada: un evento falso regalaria Premium.
   - **Version**: se aplica solo si `version` es mayor a `users.premium_version`; un duplicado o un evento fuera de orden es un no-op confirmado. Un `user_id` inexistente se confirma sin crear nada, y solo una falla transitoria de la base se reencola.

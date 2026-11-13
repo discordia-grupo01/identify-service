@@ -1,6 +1,7 @@
 package email
 
 import (
+	"mime"
 	"strings"
 	"testing"
 )
@@ -226,5 +227,78 @@ func TestSendEmailConfirmationEmailContainsConfirmationURL(t *testing.T) {
 			"email does not contain confirmation URL %q",
 			confirmURL,
 		)
+	}
+}
+
+func TestSendAccountRecoveryResultEmailApproved(t *testing.T) {
+	captured := &capturedMail{}
+	service := newService(Config{From: "no-reply@discordia.test", AppName: "Discordia"}, captured)
+
+	err := service.SendAccountRecoveryResultEmail(AccountRecoveryResultRequest{
+		Email:    "ana@example.com",
+		Name:     "Ana",
+		Approved: true,
+		LoginURL: "https://discordia.test/login",
+	})
+	if err != nil {
+		t.Fatalf("SendAccountRecoveryResultEmail() error = %v", err)
+	}
+
+	message := string(captured.message)
+	for _, expected := range []string{
+		"To: ana@example.com",
+		"Subject: " + mime.QEncoding.Encode("utf-8", "Recuperaste el acceso a tu cuenta"),
+		"desactivamos la verificación en dos pasos",
+		"Ajustes",
+		`href="https://discordia.test/login"`,
+		"Iniciar sesión",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Errorf("message does not contain %q", expected)
+		}
+	}
+	if strings.Contains(message, "no pudimos validarla") {
+		t.Error("an approval must not carry the rejection text")
+	}
+	if len(captured.recipients) != 1 || captured.recipients[0] != "ana@example.com" {
+		t.Errorf("recipients = %v", captured.recipients)
+	}
+}
+
+func TestSendAccountRecoveryResultEmailRejected(t *testing.T) {
+	captured := &capturedMail{}
+	service := newService(Config{From: "no-reply@discordia.test", AppName: "Discordia"}, captured)
+
+	err := service.SendAccountRecoveryResultEmail(AccountRecoveryResultRequest{Email: "ana@example.com", Name: "Ana"})
+	if err != nil {
+		t.Fatalf("SendAccountRecoveryResultEmail() error = %v", err)
+	}
+
+	message := string(captured.message)
+	for _, expected := range []string{
+		"Subject: " + mime.QEncoding.Encode("utf-8", "Tu solicitud de recuperación fue rechazada"),
+		"no pudimos validarla",
+		"sigue activa",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Errorf("message does not contain %q", expected)
+		}
+	}
+	if strings.Contains(message, "Iniciar sesión") {
+		t.Error("a rejection must not carry the login button")
+	}
+}
+
+func TestSendAccountRecoveryResultEmailRejectsInvalidRequest(t *testing.T) {
+	service := newService(Config{From: "no-reply@discordia.test"}, &capturedMail{})
+
+	if err := service.SendAccountRecoveryResultEmail(AccountRecoveryResultRequest{}); err != ErrInvalidEmail {
+		t.Fatalf("empty email error = %v, want %v", err, ErrInvalidEmail)
+	}
+	if err := service.SendAccountRecoveryResultEmail(AccountRecoveryResultRequest{Email: "invalid"}); err == nil {
+		t.Fatal("invalid email should return an error")
+	}
+	if err := service.SendAccountRecoveryResultEmail(AccountRecoveryResultRequest{Email: "ana@example.com", Approved: true}); err == nil {
+		t.Fatal("an approval without login URL should return an error")
 	}
 }
