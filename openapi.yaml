@@ -213,6 +213,58 @@ paths:
       summary: Complete a login that requires two-factor
       tags:
         - two-factor
+  /v1/login/2fa/recovery-request:
+    post:
+      description: For a user with 2FA on who lost both the authenticator app and
+        every recovery code. Sent from the second step of the login with the
+        challenge_token from /v1/login (or /v1/oauth/google), which proves the
+        first factor; the challenge is not consumed, so the user can still go
+        back and verify. The request stays pending until staff approves or
+        rejects it from the back-office, and the user gets the answer by email.
+        Only one pending request per user.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.AccountRecoveryCreateRequest"
+        description: Challenge token plus an optional message (up to 500 characters)
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.AccountRecoveryCreateResponse"
+        "400":
+          description: missing challenge_token, or the message is longer than 500 characters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: the challenge expired, was already used or doesn't exist
+            (TWO_FACTOR_CHALLENGE_EXPIRED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: the account is suspended (ACCOUNT_SUSPENDED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: the user already has a pending request
+            (ACCOUNT_RECOVERY_ALREADY_PENDING)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      summary: Ask staff to recover an account that lost its second factor
+      tags:
+        - two-factor
   /v1/logout:
     post:
       description: Revokes the refresh token (read from the httpOnly cookie) and
@@ -934,6 +986,35 @@ components:
         message:
           type: string
       type: object
+    model.AccountRecoveryCreateRequest:
+      properties:
+        challenge_token:
+          type: string
+        message:
+          description: Opcional. Hasta 500 caracteres.
+          type: string
+      required:
+        - challenge_token
+      type: object
+    model.AccountRecoveryCreateResponse:
+      properties:
+        email_hint:
+          type: string
+        request_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/model.AccountRecoveryStatus"
+      type: object
+    model.AccountRecoveryStatus:
+      enum:
+        - pending
+        - approved
+        - rejected
+      type: string
+      x-enum-varnames:
+        - AccountRecoveryPending
+        - AccountRecoveryApproved
+        - AccountRecoveryRejected
     model.AuthResponse:
       properties:
         refresh_token:

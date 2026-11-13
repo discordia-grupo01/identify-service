@@ -104,6 +104,19 @@ func (s *EmailService) SendEmailConfirmationEmail(request EmailConfirmationReque
 	return s.sender.Send(s.config.From, []string{request.Email}, message)
 }
 
+func (s *EmailService) SendAccountRecoveryResultEmail(request AccountRecoveryResultRequest) error {
+	if request.Email == "" {
+		return ErrInvalidEmail
+	}
+
+	message, err := renderAccountRecoveryEmail(s.config, request)
+	if err != nil {
+		return fmt.Errorf("render account recovery email: %w", err)
+	}
+
+	return s.sender.Send(s.config.From, []string{request.Email}, message)
+}
+
 func (s smtpSender) Send(from string, to []string, message []byte) error {
 	address := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 

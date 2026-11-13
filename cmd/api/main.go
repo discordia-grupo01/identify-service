@@ -97,6 +97,11 @@ func main() {
 	twoFactorRepo := repository.NewTwoFactorRepository(dbConnection)
 	twoFactorService := service.NewTwoFactorService(twoFactorRepo, userRepo, refreshRepo, twoFactorCipher)
 	twoFactorHandler := handler.NewTwoFactorHandler(twoFactorService)
+	accountRecoveryService := service.NewAccountRecoveryService(
+		repository.NewAccountRecoveryRepository(dbConnection), twoFactorRepo, userRepo, emailService,
+		getEnv("LOGIN_URL", "http://localhost:3000/login"),
+	)
+	accountRecoveryHandler := handler.NewAccountRecoveryHandler(accountRecoveryService)
 	oauthService := service.NewOAuthService(userRepo, oauthIdentityRepo, refreshRepo, googleVerifier,
 		service.WithOAuthTwoFactor(twoFactorService),
 	)
@@ -143,6 +148,7 @@ func main() {
 		go consumer.Start(context.Background())
 		adminConsumer := events.NewAdminConsumer(rabbitMQURL, adminSecret, userRepo, audit.NewRecorder(dbConnection))
 		adminConsumer.OnApplied(suspensionCache.Invalidate)
+		adminConsumer.HandleAccountRecovery(accountRecoveryService)
 		go adminConsumer.Start(context.Background())
 		// Sin el secreto de billing no se puede verificar billing.premium_updated:
 		// el consumer no arranca y nadie pasa a Premium, pero el resto sigue
@@ -176,6 +182,7 @@ func main() {
 		api.POST("/users", authHandler.Register)
 		api.POST("/login", authHandler.Login)
 		api.POST("/login/2fa", twoFactorHandler.VerifyLogin)
+		api.POST("/login/2fa/recovery-request", accountRecoveryHandler.Create)
 		api.POST("/oauth/google", oauthHandler.LoginWithGoogle)
 		api.POST("/refresh", authHandler.Refresh)
 		api.POST("/logout", middleware.RequireAuth(suspensionCache), authHandler.Logout)
