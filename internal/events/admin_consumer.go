@@ -33,14 +33,23 @@ type SuspensionApplier interface {
 	ApplySuspension(ctx context.Context, userID string, suspended bool, suspendedAt time.Time, version int64) (repository.SuspensionResult, error)
 }
 
-// AdminConsumer escucha admin.user_suspended / admin.user_reactivated. Estos
-// eventos pueden dejar a cualquiera sin acceso, así que antes de tocar nada se
+// AccountRecoveryResolver es lo que el consumidor necesita para aplicar la
+// respuesta del staff a una solicitud de recuperación de cuenta.
+type AccountRecoveryResolver interface {
+	Resolve(ctx context.Context, requestID, userID string, approved bool) (repository.RecoveryResolution, error)
+}
+
+// AdminConsumer escucha admin.user_suspended / admin.user_reactivated y, si se
+// configuró con HandleAccountRecovery, admin.account_recovery_approved /
+// admin.account_recovery_rejected. Estos eventos pueden dejar a cualquiera sin
+// acceso o sacarle el 2FA a una cuenta, así que antes de tocar nada se
 // verifica su firma HMAC con el secreto compartido con discordia-admin.
 type AdminConsumer struct {
 	url       string
 	queueName string
 	secret    string
 	applier   SuspensionApplier
+	recovery  AccountRecoveryResolver
 	recorder  *audit.Recorder
 	onApplied func(userID string)
 }
@@ -54,6 +63,20 @@ func NewAdminConsumer(url string, secret string, applier SuspensionApplier, reco
 // invalidar cachés de estado de esta instancia.
 func (c *AdminConsumer) OnApplied(fn func(userID string)) {
 	c.onApplied = fn
+}
+
+// HandleAccountRecovery suma las respuestas del staff a las solicitudes de
+// recuperación de cuenta. Hay que llamarlo antes de Start.
+func (c *AdminConsumer) HandleAccountRecovery(resolver AccountRecoveryResolver) {
+	c.recovery = resolver
+}
+
+func (c *AdminConsumer) routingKeys() []string {
+	keys := []string{admin.RoutingKeyUserSuspended, admin.RoutingKeyUserReactivated}
+	if c.recovery != nil {
+		keys = append(keys, admin.RoutingKeyAccountRecoveryApproved, admin.RoutingKeyAccountRecoveryRejected)
+	}
+	return keys
 }
 
 // SetQueueName cambia la cola que consume (por defecto AdminQueueName). Existe
@@ -106,7 +129,7 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, routingKey := range []string{admin.RoutingKeyUserSuspended, admin.RoutingKeyUserReactivated} {
+	for _, routingKey := range c.routingKeys() {
 		if err := ch.QueueBind(queue.Name, routingKey, broker.ExchangeName, false, nil); err != nil {
 			return err
 		}
@@ -145,6 +168,9 @@ func (c *AdminConsumer) consumeOnce(ctx context.Context) error {
 // causa: falla transitoria de la base). Todo lo demás se confirma: firma
 // inválida, mensaje roto, usuario inexistente, duplicado o evento viejo.
 func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []byte) bool {
+	if c.recovery != nil && (routingKey == admin.RoutingKeyAccountRecoveryApproved || routingKey == admin.RoutingKeyAccountRecoveryRejected) {
+		return c.processAccountRecovery(ctx, routingKey, body)
+	}
 	if routingKey != admin.RoutingKeyUserSuspended && routingKey != admin.RoutingKeyUserReactivated {
 		logging.Warnf("events: routing key de admin desconocida %q, descartando mensaje", routingKey)
 		c.recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedUnknownKey})
@@ -201,6 +227,60 @@ func (c *AdminConsumer) Process(ctx context.Context, routingKey string, body []b
 		if c.onApplied != nil {
 			c.onApplied(event.UserID)
 		}
+	}
+	return false
+}
+
+// processAccountRecovery aplica la aprobación o el rechazo de una solicitud de
+// recuperación. Mismas reglas que las suspensiones: solo se reencola ante una
+// falla transitoria de la base.
+func (c *AdminConsumer) processAccountRecovery(ctx context.Context, routingKey string, body []byte) bool {
+	// AccountRecoveryApproved y AccountRecoveryRejected comparten forma en el cable.
+	var event admin.AccountRecoveryApproved
+	if err := json.Unmarshal(body, &event); err != nil {
+		logging.Warnf("events: payload malformado en %q, descartando mensaje: %v", routingKey, err)
+		c.recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedMalformed, Err: err})
+		return false
+	}
+
+	approved := routingKey == admin.RoutingKeyAccountRecoveryApproved
+	var validSignature bool
+	if approved {
+		validSignature = event.Verify(c.secret)
+	} else {
+		validSignature = admin.AccountRecoveryRejected(event).Verify(c.secret)
+	}
+	if !validSignature {
+		logging.Warnf("events: WARN firma inválida en %q, event_id=%s, descartando mensaje sin cambiar nada", routingKey, event.EventID)
+		c.recorder.Record(ctx, audit.Entry{RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalidSignature, Err: errors.New("firma inválida o ausente")})
+		return false
+	}
+
+	for field, id := range map[string]string{"request_id": event.RequestID, "user_id": event.UserID} {
+		if _, err := uuid.Parse(id); err != nil {
+			logging.Warnf("events: payload inválido en %q (%s %q no es un UUID), event_id=%s, descartando mensaje", routingKey, field, id, event.EventID)
+			c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalid, Err: err})
+			return false
+		}
+	}
+
+	resolution, err := c.recovery.Resolve(ctx, event.RequestID, event.UserID, approved)
+	if err != nil {
+		logging.Errorf("events: fallo transitorio procesando %q, event_id=%s, reintentando: %v", routingKey, event.EventID, err)
+		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusPending, Err: err})
+		return true
+	}
+
+	switch resolution {
+	case repository.RecoveryNotFound:
+		logging.Warnf("events: %q event_id=%s para una solicitud inexistente (%s del usuario %s), no se cambia nada", routingKey, event.EventID, event.RequestID, event.UserID)
+		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusDiscardedInvalid, Err: errors.New("solicitud de recuperación inexistente")})
+	case repository.RecoveryAlreadyResolved:
+		logging.Debugf("events: %q event_id=%s request_id=%s ya estaba resuelta, sin cambios", routingKey, event.EventID, event.RequestID)
+		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
+	default:
+		logging.Infof("events: procesado %q event_id=%s request_id=%s user_id=%s", routingKey, event.EventID, event.RequestID, event.UserID)
+		c.recorder.Record(ctx, audit.Entry{EventID: event.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
 	}
 	return false
 }
