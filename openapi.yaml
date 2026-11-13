@@ -991,7 +991,6 @@ components:
         challenge_token:
           type: string
         message:
-          description: Opcional. Hasta 500 caracteres.
           type: string
       required:
         - challenge_token
