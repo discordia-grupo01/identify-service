@@ -6,3 +6,6 @@
 storage/
 .mcp.json
 /.openapi-tmp/
+/.contract-venv/
+/.contract-api
+/.contract-api.exe
