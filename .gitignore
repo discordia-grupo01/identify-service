@@ -10,3 +10,5 @@ storage/
 /.contract-api
 /.contract-api.exe
 /.schemathesis/
+
+schemathesis-report/
