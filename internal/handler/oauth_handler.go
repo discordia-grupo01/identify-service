@@ -19,7 +19,7 @@ func NewOAuthHandler(service service.OAuthService) *OAuthHandler {
 }
 
 type googleLoginRequest struct {
-	IDToken string `json:"id_token" binding:"required"`
+	IDToken string `json:"id_token" binding:"required" minLength:"1"`
 }
 
 // LoginWithGoogle implementa la US de login federado: CA1 (cuenta nueva),

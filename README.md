@@ -213,6 +213,24 @@ El repositorio se formatea con gofmt. Activá el hook una vez por clon, y el CI 
 git config core.hooksPath .githooks
 ```
 
+### Tests de contrato
+
+Schemathesis (`schemathesis==4.33.4`) ejecuta `openapi.yaml` contra el servicio real y falla si el código se desvía del contrato: respuestas 5xx, status no declarados, cuerpos que no cumplen el esquema, datos válidos rechazados o inválidos aceptados.
+
+```bash
+make contract-deps-up   # Postgres 16 (55504) y RabbitMQ 3.13 (55514) efímeros, y migra la base
+make contract-test      # arranca el servicio en 18084, corre Schemathesis y lo apaga
+make contract-deps-down
+```
+
+Hace falta Docker, Go y Python 3 (el script crea `.contract-venv/` e instala Schemathesis la primera vez). El script (`scripts/contract-test.sh`) levanta además un SMTP falso local (`scripts/contract/smtp_sink.py`, puerto 55524) que descarta los mails, siembra un usuario de prueba (`scripts/contract/seed.sql`), firma un JWT HS256 con un secreto de juguete y se niega a correr si la base, RabbitMQ o el SMTP no son `localhost`/`127.0.0.1`. La semilla es fija y por defecto son 25 casos por operación (`CONTRACT_MAX_EXAMPLES`). El job `contract` del CI hace lo mismo con los servicios del runner y sin secrets.
+
+Fuera del fuzzing:
+
+- `POST /v1/oauth/google`: con un token de forma válida el servicio contacta a accounts.google.com para validarlo.
+- Checks desactivados (con el motivo en `scripts/contract/schemathesis.toml`): `unsupported_method` (Gin responde 404 y no 405 a métodos no declarados) y, en operaciones puntuales, `positive_data_acceptance` / `negative_data_rejection` / `not_a_server_error` / `status_code_conformance` donde el esquema no puede expresar la regla (política de contraseña, PIN, tokens que deben existir, campos excluyentes).
+Camino feliz de los flujos con estado: con datos al azar Schemathesis nunca pasa del 4xx en registro, confirmación, login, refresh, logout, PIN, 2FA y recupero. Por eso antes del fuzzing el script corre `scripts/contract/scenario.py`, que los recorre con datos válidos contra el servicio real (lee los tokens de confirmación y de recupero de los mails que guarda el SMTP falso, y calcula el código TOTP) y valida cada respuesta contra `openapi.yaml` con la misma librería. Al final `scripts/contract/coverage.py` cuenta, con el HAR de Schemathesis y del escenario, cuántas operaciones obtuvieron al menos un 2xx real, y el script falla si alguna no lo logra (la única excepción es `POST /v1/oauth/google`, excluida del fuzzing).
+
 ## Más documentación
 
 En este repositorio:

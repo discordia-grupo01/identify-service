@@ -22,7 +22,7 @@ type AccountRecoveryRequest struct {
 }
 
 type AccountRecoveryCreateRequest struct {
-	ChallengeToken string `json:"challenge_token" binding:"required"`
+	ChallengeToken string `json:"challenge_token" binding:"required" minLength:"1"`
 	Message        string `json:"message"`
 }
 

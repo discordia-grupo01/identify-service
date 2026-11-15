@@ -3,7 +3,7 @@ package model
 import "time"
 
 type PasswordRecoveryRequest struct {
-	Email string `json:"email" binding:"required,email"`
+	Email string `json:"email" binding:"required,email" format:"email" minLength:"1"`
 }
 
 type PasswordRecovery struct {
