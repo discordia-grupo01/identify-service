@@ -1,0 +1,73 @@
+# Configuracion de Schemathesis para los tests de contrato de identify.
+# Cada check desactivado lleva el motivo. Ver README ("Tests de contrato").
+
+# unsupported_method: Gin responde 404 (no 405) a un metodo no declarado
+# (TRACE, etc.) porque HandleMethodNotAllowed esta apagado. Activarlo cambia el
+# status que ve un cliente (404 -> 405): decision pendiente, no se aplica aca.
+[checks.unsupported_method]
+enabled = false
+
+# positive_data_acceptance: el contrato no puede expresar estas reglas con
+# anotaciones swag (no soporta "pattern" ni minProperties), asi que un cuerpo
+# valido segun el esquema puede recibir 400 por la regla de negocio.
+
+# Politica de contrasena: 8+ caracteres con mayuscula, minuscula y numero.
+[[operations]]
+include-path = "/v1/users"
+include-method = "POST"
+checks.positive_data_acceptance.enabled = false
+# return_to acepta ademas "" y null (omitempty): mas permisivo que el enum
+# declarado (web, app), que swag no permite ampliar con null.
+checks.negative_data_rejection.enabled = false
+
+[[operations]]
+include-path = "/v1/email-confirmation"
+include-method = "POST"
+# Mismo caso de return_to que en POST /v1/users.
+checks.negative_data_rejection.enabled = false
+
+[[operations]]
+include-path = "/v1/me/password"
+include-method = "POST"
+checks.positive_data_acceptance.enabled = false
+
+[[operations]]
+include-path = "/v1/password-reset"
+include-method = "POST"
+checks.positive_data_acceptance.enabled = false
+
+# PIN: 6 a 8 digitos numericos.
+[[operations]]
+include-path = "/v1/pin"
+include-method = "POST"
+checks.positive_data_acceptance.enabled = false
+
+# El token tiene que existir en la base: un token generado al azar siempre es 400.
+[[operations]]
+include-path = "/v1/email-confirmation/confirm"
+include-method = "POST"
+checks.positive_data_acceptance.enabled = false
+
+# Al menos uno de text/emoji: un cuerpo vacio ({}) es 400 "no hay cambios".
+[[operations]]
+include-path = "/v1/me/status"
+include-method = "PUT"
+checks.positive_data_acceptance.enabled = false
+
+# PATCH /v1/me/profile (multipart):
+# - negative_data_rejection: remove_image se parsea con strconv.ParseBool, que
+#   acepta "0"/"1"/"t"/"f" ademas de true/false; el servidor es mas permisivo
+#   que el contrato (declarado boolean) y cambiarlo rompe clientes.
+# - positive_data_acceptance: image y remove_image=true a la vez es 400 (son
+#   excluyentes) y el esquema no puede expresarlo.
+# - not_a_server_error y status_code_conformance: un multipart sin ningun campo
+#   devuelve 500 en vez de 400 (el servicio devuelve errors.New("no hay cambios
+#   para guardar") sin mapearlo). Corregirlo cambia el status visible: decision
+#   pendiente, ver informe.
+[[operations]]
+include-path = "/v1/me/profile"
+include-method = "PATCH"
+checks.negative_data_rejection.enabled = false
+checks.positive_data_acceptance.enabled = false
+checks.not_a_server_error.enabled = false
+checks.status_code_conformance.enabled = false

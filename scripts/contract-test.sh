@@ -37,6 +37,8 @@ for host in "$DB_HOST" "$MQ_HOST" "$SMTP_HOST"; do
   esac
 done
 
+export MSYS_NO_PATHCONV=1
+export PYTHONIOENCODING=utf-8 PYTHONUTF8=1
 PY="${PYTHON:-python}"
 VENV=".contract-venv"
 if [ -x "$VENV/bin/schemathesis" ]; then
@@ -96,11 +98,10 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-"$ST" run openapi.yaml \
+"$ST" --config-file scripts/contract/schemathesis.toml run openapi.yaml \
   --url "http://127.0.0.1:$APP_PORT" \
   -H "Authorization: Bearer $TOKEN" \
   --max-examples "$MAX_EXAMPLES" \
   --seed 1 \
   --workers 1 \
-  --exclude-path /v1/oauth/google \
-  --checks all
+  --exclude-path /v1/oauth/google

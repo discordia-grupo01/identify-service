@@ -9,3 +9,4 @@ storage/
 /.contract-venv/
 /.contract-api
 /.contract-api.exe
+/.schemathesis/
