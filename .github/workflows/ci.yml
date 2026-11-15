@@ -85,11 +85,61 @@ jobs:
             exit 1
           fi
 
+  # Tests de contrato: Schemathesis contra el servicio real (ver README). Usa
+  # solo servicios locales del runner y valores de juguete: no lleva secrets.
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: discordia_identify_contract
+          POSTGRES_USER: discordia
+          POSTGRES_PASSWORD: discordia
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U discordia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CONTRACT_DB_PORT: 5432
+      CONTRACT_MQ_PORT: 5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Regenerar openapi.yaml (el contrato probado es el del codigo)
+        run: make openapi
+      - name: Instalar golang-migrate
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.1/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+      - name: Migrar la base
+        run: migrate -path=migrations -database "postgres://discordia:discordia@localhost:5432/discordia_identify_contract?sslmode=disable" up
+      - name: Tests de contrato (Schemathesis)
+        run: make contract-test
+
   # Construye la imagen y la publica en Artifact Registry. Solo corre en push a
   # main y despues de que pase `test`. Se autentica con Workload Identity
   # Federation (sin claves de larga duracion).
   publish:
-    needs: test
+    needs: [test, contract]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
