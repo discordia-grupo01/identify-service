@@ -20,11 +20,11 @@ type DevicePin struct {
 }
 
 type ConfigurePinRequest struct {
-	Pin      string `json:"pin" binding:"required"`
-	DeviceID string `json:"device_id" binding:"required"`
+	Pin      string `json:"pin" binding:"required" minLength:"1"`
+	DeviceID string `json:"device_id" binding:"required" minLength:"1"`
 }
 
 type PinLoginRequest struct {
-	Pin      string `json:"pin" binding:"required"`
-	DeviceID string `json:"device_id" binding:"required"`
+	Pin      string `json:"pin" binding:"required" minLength:"1"`
+	DeviceID string `json:"device_id" binding:"required" minLength:"1"`
 }

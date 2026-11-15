@@ -16,8 +16,8 @@ type EmailConfirmation struct {
 const ReturnToApp = "app"
 
 type EmailConfirmationRequest struct {
-	Email string `json:"email" binding:"required,email"`
+	Email string `json:"email" binding:"required,email" format:"email" minLength:"1"`
 	// "app" cuando lo pide la app mobile: el link del mail pasa por una pagina
 	// puente de la web que abre la app. Vacio o "web", el link de siempre.
-	ReturnTo string `json:"return_to,omitempty" binding:"omitempty,oneof=web app"`
+	ReturnTo string `json:"return_to,omitempty" binding:"omitempty,oneof=web app" extensions:"x-nullable"`
 }

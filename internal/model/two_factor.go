@@ -38,15 +38,15 @@ type TwoFactorChallenge struct {
 
 // TwoFactorActivateRequest confirma el QR recien escaneado (CA1).
 type TwoFactorActivateRequest struct {
-	Code string `json:"code" binding:"required"`
+	Code string `json:"code" binding:"required" minLength:"1"`
 }
 
 // TwoFactorVerifyRequest completa el login. Code acepta tanto el codigo de 6
 // digitos de la app (CA2) como un codigo de recuperacion (CA4): son el mismo
 // paso para el usuario, asi que son el mismo endpoint.
 type TwoFactorVerifyRequest struct {
-	ChallengeToken string `json:"challenge_token" binding:"required"`
-	Code           string `json:"code" binding:"required"`
+	ChallengeToken string `json:"challenge_token" binding:"required" minLength:"1"`
+	Code           string `json:"code" binding:"required" minLength:"1"`
 }
 
 // TwoFactorPasswordRequest cubre las dos operaciones sensibles sobre un 2FA ya
@@ -54,7 +54,7 @@ type TwoFactorVerifyRequest struct {
 // reingresan la contraseña, porque las dos le devuelven el acceso a quien
 // tenga la sesion abierta.
 type TwoFactorPasswordRequest struct {
-	Password string `json:"password" binding:"required"`
+	Password string `json:"password" binding:"required" minLength:"1"`
 }
 
 // TwoFactorSetupResponse es lo que necesita la pantalla del QR. Devuelve la
