@@ -3,4 +3,5 @@
 -- email verificado y no esta suspendido. Sin password: no se usa para login.
 INSERT INTO users (id, name, email, password_hash, email_verified, verified_at)
 VALUES ('00000000-0000-4000-8000-0000000000b1', 'Contract User', 'contract-user@example.test', NULL, TRUE, now())
-ON CONFLICT (id) DO NOTHING;
+-- Sin password en cada corrida: POST /v1/me/password solo la fija si la cuenta no tiene.
+ON CONFLICT (id) DO UPDATE SET password_hash = NULL;

@@ -229,7 +229,7 @@ Fuera del fuzzing:
 
 - `POST /v1/oauth/google`: con un token de forma válida el servicio contacta a accounts.google.com para validarlo.
 - Checks desactivados (con el motivo en `scripts/contract/schemathesis.toml`): `unsupported_method` (Gin responde 404 y no 405 a métodos no declarados) y, en operaciones puntuales, `positive_data_acceptance` / `negative_data_rejection` / `not_a_server_error` / `status_code_conformance` donde el esquema no puede expresar la regla (política de contraseña, PIN, tokens que deben existir, campos excluyentes).
-- Los flujos que dependen de tokens reales (2FA, recupero, confirmación, refresh) se prueban solo en validación de entrada y errores.
+Camino feliz de los flujos con estado: con datos al azar Schemathesis nunca pasa del 4xx en registro, confirmación, login, refresh, logout, PIN, 2FA y recupero. Por eso antes del fuzzing el script corre `scripts/contract/scenario.py`, que los recorre con datos válidos contra el servicio real (lee los tokens de confirmación y de recupero de los mails que guarda el SMTP falso, y calcula el código TOTP) y valida cada respuesta contra `openapi.yaml` con la misma librería. Al final `scripts/contract/coverage.py` cuenta, con el HAR de Schemathesis y del escenario, cuántas operaciones obtuvieron al menos un 2xx real, y el script falla si alguna no lo logra (la única excepción es `POST /v1/oauth/google`, excluida del fuzzing).
 
 ## Más documentación
 

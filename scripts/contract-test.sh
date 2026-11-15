@@ -53,6 +53,9 @@ else
   "$PIP" install -q "schemathesis==4.33.4"
   if [ -x "$VENV/bin/schemathesis" ]; then ST="$VENV/bin/schemathesis"; else ST="$VENV/Scripts/schemathesis.exe"; fi
 fi
+# Python del mismo entorno que Schemathesis (trae PyYAML) para medir la cobertura.
+if [ -x "$VENV/bin/python" ]; then PY_VENV="$VENV/bin/python"; elif [ -x "$VENV/Scripts/python.exe" ]; then PY_VENV="$VENV/Scripts/python.exe"; else PY_VENV="$PY"; fi
+REPORT_DIR="${CONTRACT_REPORT_DIR:-schemathesis-report}"
 
 # Siembra el usuario del token en la base efimera: con psql si esta, o dentro
 # del contenedor de contract-deps-up.
@@ -76,7 +79,8 @@ export SMTP_HOST SMTP_PORT SMTP_FROM="contract@example.test"
 export PROFILE_IMAGE_STORAGE=local PROFILE_IMAGE_DIR="$STORAGE"
 export GOOGLE_CLIENT_ID="" SUPABASE_URL="" SUPABASE_SERVICE_ROLE_KEY=""
 
-"$PY" scripts/contract/smtp_sink.py "$SMTP_PORT" &
+MAIL_DIR="$(mktemp -d)"
+"$PY" scripts/contract/smtp_sink.py "$SMTP_PORT" "$MAIL_DIR" &
 SMTP_PID=$!
 
 go build -o .contract-api ./cmd/api
@@ -84,7 +88,7 @@ go build -o .contract-api ./cmd/api
 APP_PID=$!
 cleanup() {
   kill "$APP_PID" "$SMTP_PID" 2>/dev/null || true
-  rm -rf .contract-api .contract-api.exe "$LOG" "$STORAGE"
+  rm -rf .contract-api .contract-api.exe "$LOG" "$STORAGE" "$MAIL_DIR"
 }
 trap cleanup EXIT
 
@@ -98,10 +102,19 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
+# Camino feliz de los flujos con estado (registro, login, 2FA, PIN, recupero...): lo
+# recorre un escenario con datos validos y valida cada respuesta contra el contrato.
+mkdir -p "$REPORT_DIR"
+CONTRACT_USER_TOKEN="$TOKEN" "$PY_VENV" scripts/contract/scenario.py openapi.yaml "http://127.0.0.1:$APP_PORT" "$MAIL_DIR" "$REPORT_DIR/har-scenario.json"
+
 "$ST" --config-file scripts/contract/schemathesis.toml run openapi.yaml \
   --url "http://127.0.0.1:$APP_PORT" \
   -H "Authorization: Bearer $TOKEN" \
   --max-examples "$MAX_EXAMPLES" \
   --seed 1 \
   --workers 1 \
-  --exclude-path /v1/oauth/google
+  --exclude-path /v1/oauth/google \
+  --report junit,har --report-dir "$REPORT_DIR"
+
+# Cobertura de camino feliz: cuantas operaciones del contrato obtuvieron un 2xx real.
+"$PY_VENV" scripts/contract/coverage.py openapi.yaml "$REPORT_DIR"/har-*.json
