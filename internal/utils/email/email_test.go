@@ -39,10 +39,10 @@ func TestSendPasswordResetEmail(t *testing.T) {
 	message := string(captured.message)
 	for _, expected := range []string{
 		"To: ana@example.com",
-		"Subject: Recupera tu contrasena de Discordia",
+		"Subject: " + mime.QEncoding.Encode("utf-8", "Recuperá tu contraseña de Discordia"),
 		"https://discordia.test/reset?token=abc",
 		"font-family:Inter,Arial,sans-serif",
-		"Recibimos una solicitud",
+		"Recibimos un pedido",
 	} {
 		if !strings.Contains(message, expected) {
 			t.Errorf("message does not contain %q", expected)
