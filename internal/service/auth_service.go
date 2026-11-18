@@ -30,6 +30,8 @@ var (
 	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
 	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
+	ErrPasswordNotSet        = errors.New("la cuenta todavía no tiene una contraseña configurada")
+	ErrSamePassword          = errors.New("la nueva contraseña tiene que ser distinta de la actual")
 	ErrAccountSuspended      = model.ErrAccountSuspended
 )
 
@@ -68,6 +70,9 @@ type AuthService interface {
 	// puramente federada por Google): sin esto, esa cuenta no puede activar
 	// 2FA, porque no tendria como reingresarla para desactivarlo despues.
 	SetPassword(ctx context.Context, userID string, password string) error
+	// ChangePassword reemplaza la contraseña de una cuenta que ya tiene una,
+	// pidiendo la actual.
+	ChangePassword(ctx context.Context, userID string, req model.ChangePasswordRequest) error
 }
 
 type EmailConfirmationRequester interface {
@@ -270,6 +275,38 @@ func (s *authService) SetPassword(ctx context.Context, userID string, password s
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
+}
+
+func (s *authService) ChangePassword(ctx context.Context, userID string, req model.ChangePasswordRequest) error {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if !user.PasswordHash.Valid {
+		return ErrPasswordNotSet
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.CurrentPassword)) != nil {
+		return ErrPasswordMismatch
+	}
+	if req.NewPassword != req.ConfirmPassword {
+		return ErrPasswordsDoNotMatch
+	}
+	if !validatePassword(req.NewPassword) {
+		return ErrPasswordInsecure
+	}
+	if req.NewPassword == req.CurrentPassword {
+		return ErrSamePassword
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}

@@ -193,6 +193,7 @@ func main() {
 		api.POST("/email-confirmation", emailConfirmationHandler.Request)
 		api.POST("/email-confirmation/confirm", emailConfirmationHandler.Confirm)
 		api.POST("/me/password", middleware.RequireAuth(suspensionCache), authHandler.SetPassword)
+		api.PUT("/me/password", middleware.RequireAuth(suspensionCache), authHandler.ChangePassword)
 		api.PATCH("/me/profile", middleware.RequireAuth(suspensionCache), profileHandler.Update)
 		api.GET("/me/profile", middleware.RequireAuth(suspensionCache), profileHandler.GetProfile)
 		api.GET("/users/:id", middleware.RequireAuth(suspensionCache), profileHandler.GetPublicProfile)

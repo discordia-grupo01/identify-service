@@ -502,6 +502,51 @@ paths:
       summary: Set the account's initial password
       tags:
         - auth
+    put:
+      description: Replaces the password of an account that already has one, after
+        checking the current one. Accounts without a password (purely federated
+        Google sign-ups) use POST /v1/me/password instead.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/model.ChangePasswordRequest"
+        description: Current and new password
+        required: true
+      responses:
+        "204":
+          description: no content
+        "400":
+          description: missing fields, passwords do not match, insecure password, or same
+            as the current one
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "403":
+          description: wrong current password -- not 401, so the front doesn't treat it as
+            an expired session
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+        "409":
+          description: the account has no password yet
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/model.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Change the account's password
+      tags:
+        - auth
   /v1/me/profile:
     get:
       responses:
@@ -1025,6 +1070,22 @@ components:
         user:
           $ref: "#/components/schemas/model.UserResponse"
       type: object
+    model.ChangePasswordRequest:
+      properties:
+        confirm_password:
+          minLength: 1
+          type: string
+        current_password:
+          minLength: 1
+          type: string
+        new_password:
+          minLength: 1
+          type: string
+      required:
+        - confirm_password
+        - current_password
+        - new_password
+      type: object
     model.ConfigurePinRequest:
       properties:
         device_id:
@@ -1274,6 +1335,10 @@ components:
         email:
           type: string
         email_verified:
+          type: boolean
+        has_password:
+          description: HasPassword es false en una cuenta creada solo con Google que
+            todavía no definió contraseña.
           type: boolean
         id:
           type: string

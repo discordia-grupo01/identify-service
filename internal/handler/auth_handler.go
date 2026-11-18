@@ -167,6 +167,60 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ChangePassword godoc
+// @Summary      Change the account's password
+// @Description  Replaces the password of an account that already has one, after checking the current one. Accounts without a password (purely federated Google sign-ups) use POST /v1/me/password instead.
+// @Tags         auth
+// @Accept       json
+// @Security     BearerAuth
+// @Param        body  body  model.ChangePasswordRequest  true  "Current and new password"
+// @Success      204  "no content"
+// @Failure      400  {object}  model.ErrorResponse  "missing fields, passwords do not match, insecure password, or same as the current one"
+// @Failure      401  {object}  model.ErrorResponse
+// @Failure      403  {object}  model.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      409  {object}  model.ErrorResponse  "the account has no password yet"
+// @Router       /v1/me/password [put]
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	var req model.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondInvalidInput(c, "Faltan datos para cambiar la contraseña", err)
+		return
+	}
+
+	err := h.service.ChangePassword(c.Request.Context(), c.GetString(middleware.UserIDKey), req)
+	switch {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, service.ErrPasswordNotSet):
+		c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
+			Code:    "PASSWORD_NOT_SET",
+			Message: err.Error(),
+		}})
+	case errors.Is(err, service.ErrPasswordMismatch):
+		c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
+			Code:    "INVALID_PASSWORD",
+			Message: "La contraseña actual es incorrecta",
+		}})
+	case errors.Is(err, service.ErrPasswordsDoNotMatch):
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
+			Code:    "PASSWORDS_DO_NOT_MATCH",
+			Message: "Las contraseñas no coinciden",
+		}})
+	case errors.Is(err, service.ErrPasswordInsecure):
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
+			Code:    "INSECURE_PASSWORD",
+			Message: err.Error(),
+		}})
+	case errors.Is(err, service.ErrSamePassword):
+		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
+			Code:    "SAME_PASSWORD",
+			Message: err.Error(),
+		}})
+	default:
+		respondInternalError(c)
+	}
+}
+
 // Login godoc
 // @Summary      Log in with email and password
 // @Description  Sets the refresh token as an httpOnly cookie; the response body only carries the access token (refresh_token is zeroed out). If the account has two-factor enabled, the credentials alone are not enough: the request is accepted (202) but not completed, no cookie is set, and the login is finished via POST /v1/login/2fa.
