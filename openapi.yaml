@@ -594,26 +594,32 @@ paths:
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: wrong current password -- not 401, so the front doesn't treat it as
             an expired session
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: the account has no password yet
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Change the account's password

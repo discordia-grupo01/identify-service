@@ -128,15 +128,16 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        body  body  model.ChangePasswordRequest  true  "Current and new password"
 // @Success      204  "no content"
-// @Failure      400  {object}  model.ErrorResponse  "missing fields, passwords do not match, insecure password, or same as the current one"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      403  {object}  model.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session"
-// @Failure      409  {object}  model.ErrorResponse  "the account has no password yet"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing fields, passwords do not match, insecure password, or same as the current one"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      409  {object}  apierr.ErrorResponse  "the account has no password yet"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/password [put]
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req model.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondInvalidInput(c, "Faltan datos para cambiar la contraseña", err)
+		apierr.InvalidBodyFromBinding(c, "Faltan datos para cambiar la contraseña", err)
 		return
 	}
 
@@ -145,32 +146,17 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	case err == nil:
 		c.Status(http.StatusNoContent)
 	case errors.Is(err, service.ErrPasswordNotSet):
-		c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-			Code:    "PASSWORD_NOT_SET",
-			Message: err.Error(),
-		}})
+		apierr.Abort(c, http.StatusConflict, apierr.CodePasswordNotSet, err.Error(), nil)
 	case errors.Is(err, service.ErrPasswordMismatch):
-		c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
-			Code:    "INVALID_PASSWORD",
-			Message: "La contraseña actual es incorrecta",
-		}})
+		apierr.Abort(c, http.StatusForbidden, apierr.CodeInvalidPassword, "La contraseña actual es incorrecta", nil)
 	case errors.Is(err, service.ErrPasswordsDoNotMatch):
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-			Code:    "PASSWORDS_DO_NOT_MATCH",
-			Message: "Las contraseñas no coinciden",
-		}})
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodePasswordsDoNotMatch, "Las contraseñas no coinciden", nil)
 	case errors.Is(err, service.ErrPasswordInsecure):
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-			Code:    "INSECURE_PASSWORD",
-			Message: err.Error(),
-		}})
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodeInsecurePassword, err.Error(), nil)
 	case errors.Is(err, service.ErrSamePassword):
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-			Code:    "SAME_PASSWORD",
-			Message: err.Error(),
-		}})
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodeSamePassword, err.Error(), nil)
 	default:
-		respondInternalError(c)
+		apierr.Internal(c)
 	}
 }
 
