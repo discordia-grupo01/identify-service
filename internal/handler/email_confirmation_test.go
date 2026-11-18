@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -165,7 +166,7 @@ func TestEmailConfirmationHandlerRequestRateLimited(t *testing.T) {
 		)
 	}
 
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)
@@ -285,7 +286,7 @@ func TestEmailConfirmationHandlerConfirmInvalidToken(t *testing.T) {
 		)
 	}
 
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)
@@ -325,7 +326,7 @@ func TestEmailConfirmationHandlerConfirmAlreadyUsed(t *testing.T) {
 		)
 	}
 
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)

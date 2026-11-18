@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/discordia-grupo01/identify-service/internal/model"
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -35,22 +35,17 @@ type googleLoginRequest struct {
 // @Param        body  body  googleLoginRequest  true  "Google ID token"
 // @Success      200  {object}  model.AuthResponse  "no two-factor on this account: session granted"
 // @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
-// @Failure      400  {object}  model.ErrorResponse  "missing id_token"
-// @Failure      401  {object}  model.ErrorResponse  "token could not be validated"
-// @Failure      403  {object}  model.ErrorResponse  "the account is suspended (ACCOUNT_SUSPENDED)"
-// @Failure      503  {object}  model.ErrorResponse  "Google unreachable"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing id_token"
+// @Failure      401  {object}  apierr.ErrorResponse  "token could not be validated"
+// @Failure      403  {object}  apierr.ErrorResponse  "the account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      503  {object}  apierr.ErrorResponse  "Google unreachable"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/oauth/google [post]
 func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {
 	var req googleLoginRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error: model.APIError{
-				Code:    "INVALID_INPUT",
-				Message: "Falta el id_token del proveedor externo",
-				Details: map[string]any{"reason": err.Error()},
-			},
-		})
+		apierr.InvalidBodyFromBinding(c, "Falta el id_token del proveedor externo", err)
 		return
 	}
 
@@ -58,31 +53,16 @@ func (h *OAuthHandler) LoginWithGoogle(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAccountSuspended):
-			respondAccountSuspended(c)
+			apierr.AccountSuspended(c)
 
 		case errors.Is(err, service.ErrOAuthProviderUnavailable):
-			c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "OAUTH_PROVIDER_UNAVAILABLE",
-					Message: "No pudimos contactar al proveedor de identidad externo. Inicia sesión con tu correo y contraseña.",
-				},
-			})
+			apierr.Abort(c, http.StatusServiceUnavailable, apierr.CodeOAuthProviderUnavailable, "No pudimos contactar al proveedor de identidad externo. Inicia sesión con tu correo y contraseña.", nil)
 
 		case errors.Is(err, service.ErrOAuthTokenInvalid):
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "OAUTH_TOKEN_INVALID",
-					Message: "No pudimos validar tu identidad con el proveedor externo",
-				},
-			})
+			apierr.Abort(c, http.StatusUnauthorized, apierr.CodeOAuthTokenInvalid, "No pudimos validar tu identidad con el proveedor externo", nil)
 
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INTERNAL_SERVER_ERROR",
-					Message: "Ha ocurrido un error inesperado en el servidor",
-				},
-			})
+			apierr.Internal(c)
 		}
 		return
 	}

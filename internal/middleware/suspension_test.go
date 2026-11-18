@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/discordia-grupo01/identify-service/internal/model"
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 )
 
 type suspensionCheckerStub struct {
@@ -48,7 +48,7 @@ func TestRequireAuthRejectsASuspendedUserWithAValidToken(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
-	var body model.ErrorResponse
+	var body apierr.ErrorResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}

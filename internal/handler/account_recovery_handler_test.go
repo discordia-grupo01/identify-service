@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -92,7 +93,7 @@ func TestAccountRecoveryHandlerMapsErrors(t *testing.T) {
 		"desafío vencido": {service.ErrTwoFactorChallengeInvalid, http.StatusUnauthorized, "TWO_FACTOR_CHALLENGE_EXPIRED"},
 		"suspendida":      {service.ErrAccountSuspended, http.StatusForbidden, "ACCOUNT_SUSPENDED"},
 		"ya pendiente":    {service.ErrAccountRecoveryAlreadyPending, http.StatusConflict, "ACCOUNT_RECOVERY_ALREADY_PENDING"},
-		"falla interna":   {errors.New("db caída"), http.StatusInternalServerError, "INTERNAL_SERVER_ERROR"},
+		"falla interna":   {errors.New("db caída"), http.StatusInternalServerError, "INTERNAL_ERROR"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -101,7 +102,7 @@ func TestAccountRecoveryHandlerMapsErrors(t *testing.T) {
 			if recorder.Code != tc.status {
 				t.Fatalf("status = %d, want %d", recorder.Code, tc.status)
 			}
-			var body model.ErrorResponse
+			var body apierr.ErrorResponse
 			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}

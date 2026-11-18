@@ -15,6 +15,7 @@ import (
 	"net/textproto"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -132,7 +133,7 @@ func TestGetPublicProfileHandlerRejectsInvalidID(t *testing.T) {
 	serviceStub := &profileServiceStub{}
 	recorder := performGetPublicProfileRequest(t, serviceStub, "caller-id", "not-a-uuid")
 
-	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_USER_ID")
+	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_PARAMETER")
 	if serviceStub.called {
 		t.Fatal("service must not be called with an invalid id")
 	}
@@ -210,7 +211,7 @@ func TestUpdateStatusHandlerRejectsInvalidJSON(t *testing.T) {
 	serviceStub := &profileServiceStub{}
 	recorder := performStatusPutRequest(t, serviceStub, "user-id", `not json`, true)
 
-	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_STATUS")
+	assertProfileError(t, recorder, http.StatusBadRequest, "INVALID_BODY")
 	if serviceStub.called {
 		t.Fatal("service must not be called with an invalid JSON body")
 	}
@@ -227,7 +228,7 @@ func TestUpdateStatusHandlerMapsServiceErrors(t *testing.T) {
 		{name: "invalid text", err: service.ErrInvalidStatusText, wantStatus: http.StatusBadRequest, wantCode: "INVALID_STATUS"},
 		{name: "invalid emoji", err: service.ErrInvalidStatusEmoji, wantStatus: http.StatusBadRequest, wantCode: "INVALID_STATUS"},
 		{name: "missing user", err: service.ErrUserNotFound, wantStatus: http.StatusNotFound, wantCode: "USER_NOT_FOUND"},
-		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
 	}
 
 	for _, test := range tests {
@@ -397,7 +398,7 @@ func TestProfileHandlerMapsServiceErrors(t *testing.T) {
 	}{
 		{name: "invalid profile", err: service.ErrInvalidProfileName, wantStatus: http.StatusBadRequest, wantCode: "INVALID_PROFILE"},
 		{name: "missing user", err: service.ErrUserNotFound, wantStatus: http.StatusNotFound, wantCode: "USER_NOT_FOUND"},
-		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
 	}
 
 	for _, test := range tests {
@@ -491,7 +492,7 @@ func assertProfileError(t *testing.T, recorder *httptest.ResponseRecorder, wantS
 	if recorder.Code != wantStatus {
 		t.Fatalf("status = %d, want %d", recorder.Code, wantStatus)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeProfileJSON(t, recorder, &response)
 	if response.Error.Code != wantCode {
 		t.Fatalf("error code = %q, want %q", response.Error.Code, wantCode)
