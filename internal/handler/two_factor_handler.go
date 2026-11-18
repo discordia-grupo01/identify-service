@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -25,12 +26,13 @@ func NewTwoFactorHandler(service service.TwoFactorService) *TwoFactorHandler {
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  model.TwoFactorStatusResponse
-// @Failure      401  {object}  model.ErrorResponse
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa [get]
 func (h *TwoFactorHandler) Status(c *gin.Context) {
 	status, err := h.service.Status(c.Request.Context(), c.GetString(middleware.UserIDKey))
 	if err != nil {
-		respondInternalError(c)
+		apierr.Internal(c)
 		return
 	}
 	c.JSON(http.StatusOK, status)
@@ -42,25 +44,20 @@ func (h *TwoFactorHandler) Status(c *gin.Context) {
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  model.TwoFactorSetupResponse
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      409  {object}  model.ErrorResponse  "2FA is already enabled on this account, or the account has no password yet"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      409  {object}  apierr.ErrorResponse  "2FA is already enabled on this account, or the account has no password yet"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/setup [post]
 func (h *TwoFactorHandler) Setup(c *gin.Context) {
 	res, err := h.service.StartSetup(c.Request.Context(), c.GetString(middleware.UserIDKey))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTwoFactorAlreadyEnabled):
-			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-				Code:    "TWO_FACTOR_ALREADY_ENABLED",
-				Message: "El segundo factor ya está activo en esta cuenta",
-			}})
+			apierr.Abort(c, http.StatusConflict, apierr.CodeTwoFactorAlreadyEnabled, "El segundo factor ya está activo en esta cuenta", nil)
 		case errors.Is(err, service.ErrPasswordRequiredForTwoFactor):
-			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-				Code:    "PASSWORD_REQUIRED_FOR_TWO_FACTOR",
-				Message: err.Error(),
-			}})
+			apierr.Abort(c, http.StatusConflict, apierr.CodePasswordRequiredForTwoFactor, err.Error(), nil)
 		default:
-			respondInternalError(c)
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -75,14 +72,15 @@ func (h *TwoFactorHandler) Setup(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        body  body  model.TwoFactorActivateRequest  true  "6-digit code from the authenticator app"
 // @Success      200  {object}  model.TwoFactorRecoveryCodesResponse
-// @Failure      400  {object}  model.ErrorResponse  "missing code, or the code is wrong/expired"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      409  {object}  model.ErrorResponse  "no pending setup, or 2FA is already enabled"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing code, or the code is wrong/expired"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      409  {object}  apierr.ErrorResponse  "no pending setup, or 2FA is already enabled"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/activate [post]
 func (h *TwoFactorHandler) Activate(c *gin.Context) {
 	var req model.TwoFactorActivateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondInvalidInput(c, "Falta el código de verificación", err)
+		apierr.InvalidBodyFromBinding(c, "Falta el código de verificación", err)
 		return
 	}
 
@@ -90,25 +88,16 @@ func (h *TwoFactorHandler) Activate(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTwoFactorSetupMissing):
-			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-				Code:    "TWO_FACTOR_SETUP_MISSING",
-				Message: "Primero hay que escanear el código QR",
-			}})
+			apierr.Abort(c, http.StatusConflict, apierr.CodeTwoFactorSetupMissing, "Primero hay que escanear el código QR", nil)
 		case errors.Is(err, service.ErrTwoFactorAlreadyEnabled):
-			c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-				Code:    "TWO_FACTOR_ALREADY_ENABLED",
-				Message: "El segundo factor ya está activo en esta cuenta",
-			}})
+			apierr.Abort(c, http.StatusConflict, apierr.CodeTwoFactorAlreadyEnabled, "El segundo factor ya está activo en esta cuenta", nil)
 		case errors.Is(err, service.ErrTwoFactorCodeInvalid):
 			// 400 y no 401: la sesión es válida, lo que está mal es el código
 			// que se tipeó. Un 401 acá haría que el front creyera que la
 			// sesión venció y mandaría al login.
-			c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-				Code:    "INVALID_TWO_FACTOR_CODE",
-				Message: "El código no es correcto. Revisá que sea el actual de tu app.",
-			}})
+			apierr.Abort(c, http.StatusBadRequest, apierr.CodeInvalidTwoFactorCode, "El código no es correcto. Revisá que sea el actual de tu app.", nil)
 		default:
-			respondInternalError(c)
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -124,15 +113,16 @@ func (h *TwoFactorHandler) Activate(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        body  body  model.TwoFactorPasswordRequest  true  "Account password"
 // @Success      204  "2FA disabled"
-// @Failure      400  {object}  model.ErrorResponse  "missing password"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      403  {object}  model.ErrorResponse  "wrong password -- not 401, so the front doesn't treat it as an expired session"
-// @Failure      409  {object}  model.ErrorResponse  "2FA is not enabled on this account"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing password"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      409  {object}  apierr.ErrorResponse  "2FA is not enabled on this account"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/disable [post]
 func (h *TwoFactorHandler) Disable(c *gin.Context) {
 	var req model.TwoFactorPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondInvalidInput(c, "Falta la contraseña", err)
+		apierr.InvalidBodyFromBinding(c, "Falta la contraseña", err)
 		return
 	}
 
@@ -151,15 +141,16 @@ func (h *TwoFactorHandler) Disable(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        body  body  model.TwoFactorPasswordRequest  true  "Account password"
 // @Success      200  {object}  model.TwoFactorRecoveryCodesResponse
-// @Failure      400  {object}  model.ErrorResponse  "missing password"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      403  {object}  model.ErrorResponse  "wrong password"
-// @Failure      409  {object}  model.ErrorResponse  "2FA is not enabled on this account"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing password"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong password"
+// @Failure      409  {object}  apierr.ErrorResponse  "2FA is not enabled on this account"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/recovery-codes [post]
 func (h *TwoFactorHandler) RegenerateRecoveryCodes(c *gin.Context) {
 	var req model.TwoFactorPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondInvalidInput(c, "Falta la contraseña", err)
+		apierr.InvalidBodyFromBinding(c, "Falta la contraseña", err)
 		return
 	}
 
@@ -178,15 +169,16 @@ func (h *TwoFactorHandler) RegenerateRecoveryCodes(c *gin.Context) {
 // @Produce      json
 // @Param        body  body  model.TwoFactorVerifyRequest  true  "Challenge token plus a TOTP or recovery code"
 // @Success      200  {object}  model.TwoFactorVerifyResponse
-// @Failure      400  {object}  model.ErrorResponse  "missing challenge_token or code"
-// @Failure      401  {object}  model.ErrorResponse  "wrong/expired code, or the challenge itself expired/was already used"
-// @Failure      403  {object}  model.ErrorResponse  "the account was suspended after the challenge was issued (ACCOUNT_SUSPENDED)"
-// @Failure      429  {object}  model.ErrorResponse  "too many failed attempts on this challenge"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing challenge_token or code"
+// @Failure      401  {object}  apierr.ErrorResponse  "wrong/expired code, or the challenge itself expired/was already used"
+// @Failure      403  {object}  apierr.ErrorResponse  "the account was suspended after the challenge was issued (ACCOUNT_SUSPENDED)"
+// @Failure      429  {object}  apierr.ErrorResponse  "too many failed attempts on this challenge"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/login/2fa [post]
 func (h *TwoFactorHandler) VerifyLogin(c *gin.Context) {
 	var req model.TwoFactorVerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		respondInvalidInput(c, "Falta el código de verificación", err)
+		apierr.InvalidBodyFromBinding(c, "Falta el código de verificación", err)
 		return
 	}
 
@@ -194,24 +186,15 @@ func (h *TwoFactorHandler) VerifyLogin(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAccountSuspended):
-			respondAccountSuspended(c)
+			apierr.AccountSuspended(c)
 		case errors.Is(err, service.ErrTwoFactorCodeInvalid):
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-				Code:    "INVALID_TWO_FACTOR_CODE",
-				Message: "El código no es correcto o ya expiró",
-			}})
+			apierr.Abort(c, http.StatusUnauthorized, apierr.CodeInvalidTwoFactorCode, "El código no es correcto o ya expiró", nil)
 		case errors.Is(err, service.ErrTwoFactorTooManyAttempts):
-			c.JSON(http.StatusTooManyRequests, model.ErrorResponse{Error: model.APIError{
-				Code:    "TWO_FACTOR_TOO_MANY_ATTEMPTS",
-				Message: "Demasiados intentos fallidos. Volvé a iniciar sesión.",
-			}})
+			apierr.Abort(c, http.StatusTooManyRequests, apierr.CodeTwoFactorTooManyAttempts, "Demasiados intentos fallidos. Volvé a iniciar sesión.", nil)
 		case errors.Is(err, service.ErrTwoFactorChallengeInvalid):
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-				Code:    "TWO_FACTOR_CHALLENGE_EXPIRED",
-				Message: "La verificación expiró. Volvé a iniciar sesión.",
-			}})
+			apierr.Abort(c, http.StatusUnauthorized, apierr.CodeTwoFactorChallengeExpired, "La verificación expiró. Volvé a iniciar sesión.", nil)
 		default:
-			respondInternalError(c)
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -224,31 +207,10 @@ func (h *TwoFactorHandler) VerifyLogin(c *gin.Context) {
 func respondTwoFactorPasswordError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPasswordMismatch):
-		c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
-			Code:    "INVALID_PASSWORD",
-			Message: "La contraseña es incorrecta",
-		}})
+		apierr.Abort(c, http.StatusForbidden, apierr.CodeInvalidPassword, "La contraseña es incorrecta", nil)
 	case errors.Is(err, service.ErrTwoFactorNotEnabled):
-		c.JSON(http.StatusConflict, model.ErrorResponse{Error: model.APIError{
-			Code:    "TWO_FACTOR_NOT_ENABLED",
-			Message: "El segundo factor no está activo en esta cuenta",
-		}})
+		apierr.Abort(c, http.StatusConflict, apierr.CodeTwoFactorNotEnabled, "El segundo factor no está activo en esta cuenta", nil)
 	default:
-		respondInternalError(c)
+		apierr.Internal(c)
 	}
-}
-
-func respondInvalidInput(c *gin.Context, message string, err error) {
-	c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-		Code:    "INVALID_INPUT",
-		Message: message,
-		Details: map[string]any{"reason": err.Error()},
-	}})
-}
-
-func respondInternalError(c *gin.Context) {
-	c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-		Code:    "INTERNAL_SERVER_ERROR",
-		Message: "Ha ocurrido un error inesperado en el servidor",
-	}})
 }

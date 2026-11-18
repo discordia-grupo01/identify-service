@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -124,7 +125,7 @@ func TestPinHandlerConfigureMapsInvalidFormatToBadRequest(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "INVALID_PIN" {
 		t.Fatalf("error code = %q, want INVALID_PIN", response.Error.Code)
@@ -193,7 +194,7 @@ func TestPinHandlerLoginMapsUnknownDeviceToUnauthorized(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d (CA4: atado a este dispositivo)", recorder.Code, http.StatusUnauthorized)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "INVALID_PIN" {
 		t.Fatalf("error code = %q, want INVALID_PIN", response.Error.Code)
@@ -217,7 +218,7 @@ func TestPinHandlerLoginMapsEmailNotVerifiedToForbidden(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "EMAIL_NOT_VERIFIED" {
 		t.Fatalf("error code = %q, want EMAIL_NOT_VERIFIED", response.Error.Code)
@@ -232,7 +233,7 @@ func TestPinHandlerLoginMapsPinLockedTo423WithFallbackAndRetryAfter(t *testing.T
 	if recorder.Code != http.StatusLocked {
 		t.Fatalf("status = %d, want %d (CA3: bloqueo temporal)", recorder.Code, http.StatusLocked)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "PIN_LOCKED" {
 		t.Fatalf("error code = %q, want PIN_LOCKED", response.Error.Code)

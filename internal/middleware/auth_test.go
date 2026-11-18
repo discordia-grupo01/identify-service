@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/discordia-grupo01/identify-service/internal/model"
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -63,7 +63,7 @@ func TestRequireAuthRejectsExpiredTokenAndPreservesPendingAction(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -208,4 +208,23 @@ func signedToken(t *testing.T, userID string, expiresAt time.Time) string {
 		t.Fatalf("SignedString() error: %v", err)
 	}
 	return signed
+}
+
+func TestRequireAuthWithoutTokenReturnsUnauthorizedEnvelope(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	router := gin.New()
+	router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/private", nil))
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+	var response apierr.ErrorResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error.Code != "UNAUTHORIZED" || response.Error.Message == "" || response.Error.Details == nil {
+		t.Fatalf("envelope = %+v, want UNAUTHORIZED with message and details {}", response.Error)
+	}
 }

@@ -2,13 +2,13 @@ package middleware
 
 import (
 	"context"
-	"net/http"
+	"errors"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/discordia-grupo01/identify-service/internal/model"
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -30,7 +30,7 @@ func RequireAuth(checker SuspensionChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authorization := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authorization, "Bearer ") {
-			unauthorized(c)
+			apierr.Unauthorized(c)
 			return
 		}
 
@@ -41,14 +41,18 @@ func RequireAuth(checker SuspensionChecker) gin.HandlerFunc {
 			}
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			sessionExpired(c)
+			return
+		}
 		if err != nil || !token.Valid {
-			unauthorized(c)
+			apierr.Unauthorized(c)
 			return
 		}
 
 		userID, ok := claims["sub"].(string)
 		if !ok || userID == "" {
-			unauthorized(c)
+			apierr.Unauthorized(c)
 			return
 		}
 
@@ -57,21 +61,11 @@ func RequireAuth(checker SuspensionChecker) gin.HandlerFunc {
 			if err != nil {
 				// Fallar cerrado: sin poder saber si la cuenta está suspendida
 				// no se deja pasar la request.
-				c.AbortWithStatusJSON(http.StatusServiceUnavailable, model.ErrorResponse{
-					Error: model.APIError{
-						Code:    "SERVICE_UNAVAILABLE",
-						Message: "No pudimos verificar el estado de la cuenta, probá de nuevo en unos segundos",
-					},
-				})
+				apierr.ServiceUnavailable(c, "No pudimos verificar el estado de la cuenta, probá de nuevo en unos segundos")
 				return
 			}
 			if suspended {
-				c.AbortWithStatusJSON(http.StatusForbidden, model.ErrorResponse{
-					Error: model.APIError{
-						Code:    "ACCOUNT_SUSPENDED",
-						Message: "Tu cuenta está suspendida",
-					},
-				})
+				apierr.AccountSuspended(c)
 				return
 			}
 		}
@@ -141,18 +135,14 @@ func (c *SuspensionCache) Invalidate(userID string) {
 	c.mu.Unlock()
 }
 
-func unauthorized(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusUnauthorized, model.ErrorResponse{
-		Error: model.APIError{
-			Code:    "SESSION_EXPIRED",
-			Message: "La sesión expiró o ya no es válida",
-			Details: map[string]any{
-				"redirect_to": "/v1/login",
-				"pending_action": map[string]string{
-					"method": c.Request.Method,
-					"path":   c.Request.URL.RequestURI(),
-				},
-			},
+// sessionExpired responde 401 SESSION_EXPIRED: el access token es válido pero
+// venció, así que el cliente puede refrescar y reintentar la acción pendiente.
+func sessionExpired(c *gin.Context) {
+	apierr.SessionExpired(c, map[string]any{
+		"redirect_to": "/v1/login",
+		"pending_action": map[string]string{
+			"method": c.Request.Method,
+			"path":   c.Request.URL.RequestURI(),
 		},
 	})
 }

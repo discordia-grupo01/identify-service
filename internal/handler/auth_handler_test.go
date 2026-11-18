@@ -7,9 +7,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -113,10 +115,10 @@ func TestAuthHandlerRegisterRejectsInvalidEmailBeforeCallingService(t *testing.T
 		t.Fatal("service must not be called for an invalid email")
 	}
 
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "INVALID_INPUT" {
-		t.Fatalf("error code = %q, want INVALID_INPUT", response.Error.Code)
+	if response.Error.Code != "INVALID_BODY" {
+		t.Fatalf("error code = %q, want INVALID_BODY", response.Error.Code)
 	}
 }
 
@@ -141,7 +143,7 @@ func TestAuthHandlerRegisterMapsBusinessErrors(t *testing.T) {
 	}{
 		{name: "email already exists", err: service.ErrEmailInUse, wantStatus: http.StatusConflict, wantErrorCode: "EMAIL_ALREADY_EXISTS"},
 		{name: "insecure password", err: service.ErrPasswordInsecure, wantStatus: http.StatusBadRequest, wantErrorCode: "INSECURE_PASSWORD"},
-		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_SERVER_ERROR"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_ERROR"},
 	}
 
 	for _, test := range tests {
@@ -153,7 +155,7 @@ func TestAuthHandlerRegisterMapsBusinessErrors(t *testing.T) {
 				t.Fatalf("status = %d, want %d", recorder.Code, test.wantStatus)
 			}
 
-			var response model.ErrorResponse
+			var response apierr.ErrorResponse
 			decodeJSON(t, recorder, &response)
 			if response.Error.Code != test.wantErrorCode {
 				t.Fatalf("error code = %q, want %q", response.Error.Code, test.wantErrorCode)
@@ -204,7 +206,7 @@ func TestAuthHandlerLoginUsesSameErrorForUnknownEmailAndWrongPassword(t *testing
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 			}
 
-			var response model.ErrorResponse
+			var response apierr.ErrorResponse
 			decodeJSON(t, recorder, &response)
 			if response.Error.Code != "INVALID_CREDENTIALS" {
 				t.Fatalf("error code = %q, want INVALID_CREDENTIALS", response.Error.Code)
@@ -232,7 +234,7 @@ func TestAuthHandlerLoginMapsEmailNotVerifiedSeparately(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "EMAIL_NOT_VERIFIED" {
 		t.Fatalf("error code = %q, want EMAIL_NOT_VERIFIED", response.Error.Code)
@@ -249,10 +251,10 @@ func TestAuthHandlerLoginRejectsInvalidEmailBeforeCallingService(t *testing.T) {
 	if serviceStub.called {
 		t.Fatal("service must not be called for an invalid email")
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "INVALID_INPUT" {
-		t.Fatalf("error code = %q, want INVALID_INPUT", response.Error.Code)
+	if response.Error.Code != "INVALID_BODY" {
+		t.Fatalf("error code = %q, want INVALID_BODY", response.Error.Code)
 	}
 }
 
@@ -266,10 +268,10 @@ func TestAuthHandlerLoginRejectsMissingRequiredFields(t *testing.T) {
 	if serviceStub.called {
 		t.Fatal("service must not be called for missing required fields")
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "INVALID_INPUT" {
-		t.Fatalf("error code = %q, want INVALID_INPUT", response.Error.Code)
+	if response.Error.Code != "INVALID_BODY" {
+		t.Fatalf("error code = %q, want INVALID_BODY", response.Error.Code)
 	}
 }
 
@@ -312,10 +314,10 @@ func TestAuthHandlerRefreshRejectsMissingCookie(t *testing.T) {
 	if serviceStub.refreshCalled {
 		t.Fatal("service Refresh() must not be called without a refresh token")
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "SESSION_EXPIRED" {
-		t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
+	if response.Error.Code != "UNAUTHORIZED" {
+		t.Fatalf("error code = %q, want UNAUTHORIZED", response.Error.Code)
 	}
 }
 
@@ -336,7 +338,7 @@ func TestAuthHandlerRefreshMapsInvalidOrReusedToken(t *testing.T) {
 			if recorder.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 			}
-			var response model.ErrorResponse
+			var response apierr.ErrorResponse
 			decodeJSON(t, recorder, &response)
 			if response.Error.Code != "SESSION_EXPIRED" {
 				t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
@@ -357,10 +359,10 @@ func TestAuthHandlerRefreshMapsUnexpectedError(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "INTERNAL_SERVER_ERROR" {
-		t.Fatalf("error code = %q, want INTERNAL_SERVER_ERROR", response.Error.Code)
+	if response.Error.Code != "INTERNAL_ERROR" {
+		t.Fatalf("error code = %q, want INTERNAL_ERROR", response.Error.Code)
 	}
 }
 
@@ -391,7 +393,7 @@ func TestAuthHandlerLogoutRejectsMissingCookie(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "UNAUTHORIZED" {
 		t.Fatalf("error code = %q, want UNAUTHORIZED", response.Error.Code)
@@ -408,7 +410,7 @@ func TestAuthHandlerLogoutMapsExpiredOrRevokedSession(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "SESSION_EXPIRED" {
 		t.Fatalf("error code = %q, want SESSION_EXPIRED", response.Error.Code)
@@ -422,10 +424,10 @@ func TestAuthHandlerLogoutMapsUnexpectedServiceError(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
-	if response.Error.Code != "INTERNAL_SERVER_ERROR" {
-		t.Fatalf("error code = %q, want INTERNAL_SERVER_ERROR", response.Error.Code)
+	if response.Error.Code != "INTERNAL_ERROR" {
+		t.Fatalf("error code = %q, want INTERNAL_ERROR", response.Error.Code)
 	}
 }
 
@@ -467,7 +469,7 @@ func TestAuthHandlerSetPasswordMapsInsecurePasswordToBadRequest(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "INSECURE_PASSWORD" {
 		t.Fatalf("error code = %q, want INSECURE_PASSWORD", response.Error.Code)
@@ -482,7 +484,7 @@ func TestAuthHandlerSetPasswordMapsAlreadySetToConflict(t *testing.T) {
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "PASSWORD_ALREADY_SET" {
 		t.Fatalf("error code = %q, want PASSWORD_ALREADY_SET", response.Error.Code)
@@ -582,5 +584,24 @@ func decodeJSON(t *testing.T, recorder *httptest.ResponseRecorder, target any) {
 	t.Helper()
 	if err := json.NewDecoder(recorder.Body).Decode(target); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+}
+
+func TestAuthHandlerLoginInvalidBodyDoesNotExposeBindingError(t *testing.T) {
+	recorder := performLoginRequest(t, &authServiceStub{}, `{"email":"a@b.com"}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var response apierr.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INVALID_BODY" {
+		t.Fatalf("error code = %q, want INVALID_BODY", response.Error.Code)
+	}
+	if response.Error.Details["field"] != "password" || response.Error.Details["reason"] != "required" {
+		t.Fatalf("details = %v, want field=password reason=required", response.Error.Details)
+	}
+	if strings.Contains(recorder.Body.String(), "Key:") {
+		t.Fatalf("body leaks the validator error: %s", recorder.Body.String())
 	}
 }
