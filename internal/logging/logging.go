@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -237,7 +238,12 @@ func Recovery() gin.HandlerFunc {
 			"error", fmt.Sprint(recovered),
 			"stack", string(debug.Stack()),
 		)
-		c.AbortWithStatus(http.StatusInternalServerError)
+		if c.Writer.Written() {
+			// La respuesta ya empezó: no se puede reescribir, sólo cortar.
+			c.Abort()
+			return
+		}
+		apierr.Internal(c)
 	})
 }
 

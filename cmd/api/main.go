@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/audit"
 	"github.com/discordia-grupo01/identify-service/internal/events"
 	"github.com/discordia-grupo01/identify-service/internal/handler"
@@ -70,6 +71,7 @@ func main() {
 
 	router := gin.New()
 	router.Use(telemetry.Middleware(), logging.Middleware(), logging.Recovery())
+	apierr.RegisterFallbacks(router)
 
 	userRepo := repository.NewUserRepository(dbConnection)
 	refreshRepo := repository.NewRefreshTokenRepository(dbConnection)

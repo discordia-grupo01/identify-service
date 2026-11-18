@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -84,7 +85,7 @@ func TestPasswordRecoveryHandlerRejectsInvalidRequestsBeforeService(t *testing.T
 			serviceStub := &passwordRecoveryServiceStub{}
 			recorder := performPasswordRecoveryRequest(t, serviceStub, test.body)
 
-			assertErrorResponse(t, recorder, http.StatusBadRequest, "INVALID_INPUT")
+			assertErrorResponse(t, recorder, http.StatusBadRequest, "INVALID_BODY")
 			if serviceStub.recoverCalled {
 				t.Fatal("service must not be called for invalid input")
 			}
@@ -100,7 +101,7 @@ func TestPasswordRecoveryHandlerMapsBusinessAndUnexpectedErrors(t *testing.T) {
 		wantCode   string
 	}{
 		{name: "rate limited", err: service.ErrRecoveryRateLimited, wantStatus: http.StatusTooManyRequests, wantCode: "RECOVERY_RATE_LIMITED"},
-		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
 	}
 
 	for _, test := range tests {
@@ -149,7 +150,7 @@ func TestPasswordResetHandlerRejectsInvalidRequestsBeforeService(t *testing.T) {
 			serviceStub := &passwordRecoveryServiceStub{}
 			recorder := performPasswordResetRequest(t, serviceStub, test.body)
 
-			assertErrorResponse(t, recorder, http.StatusBadRequest, "INVALID_INPUT")
+			assertErrorResponse(t, recorder, http.StatusBadRequest, "INVALID_BODY")
 			if serviceStub.resetCalled {
 				t.Fatal("service must not be called for invalid input")
 			}
@@ -167,7 +168,7 @@ func TestPasswordResetHandlerMapsAllBusinessErrors(t *testing.T) {
 		{name: "passwords do not match", err: service.ErrPasswordsDoNotMatch, wantStatus: http.StatusBadRequest, wantCode: "PASSWORDS_DO_NOT_MATCH"},
 		{name: "insecure password", err: service.ErrPasswordInsecure, wantStatus: http.StatusBadRequest, wantCode: "INSECURE_PASSWORD"},
 		{name: "invalid token", err: service.ErrInvalidResetToken, wantStatus: http.StatusBadRequest, wantCode: "INVALID_RESET_TOKEN"},
-		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR"},
+		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
 	}
 
 	for _, test := range tests {
@@ -207,7 +208,7 @@ func assertErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, want
 	if recorder.Code != wantStatus {
 		t.Fatalf("status = %d, want %d", recorder.Code, wantStatus)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodePasswordRecoveryJSON(t, recorder, &response)
 	if response.Error.Code != wantCode {
 		t.Fatalf("error code = %q, want %q", response.Error.Code, wantCode)

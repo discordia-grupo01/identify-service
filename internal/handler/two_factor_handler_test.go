@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -140,7 +141,7 @@ func TestTwoFactorHandlerActivateMapsBusinessErrors(t *testing.T) {
 		},
 		{
 			name: "error inesperado", err: errors.New("boom"),
-			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_SERVER_ERROR",
+			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_ERROR",
 		},
 	}
 
@@ -282,7 +283,7 @@ func TestTwoFactorHandlerVerifyLoginMapsBusinessErrors(t *testing.T) {
 		},
 		{
 			name: "error inesperado", err: errors.New("boom"),
-			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_SERVER_ERROR",
+			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_ERROR",
 		},
 	}
 
@@ -305,7 +306,7 @@ func TestTwoFactorHandlerVerifyLoginRejectsAMissingCode(t *testing.T) {
 
 	recorder := performPublicRequest(t, serviceStub, "/v1/login/2fa", `{"challenge_token":"abc"}`)
 
-	assertAPIError(t, recorder, http.StatusBadRequest, "INVALID_INPUT")
+	assertAPIError(t, recorder, http.StatusBadRequest, "INVALID_BODY")
 	if serviceStub.called {
 		t.Fatal("the service must not be called when the code is missing")
 	}
@@ -344,7 +345,7 @@ func TestTwoFactorHandlerPasswordProtectedEndpointsMapBusinessErrors(t *testing.
 		},
 		{
 			name: "error inesperado", err: errors.New("boom"),
-			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_SERVER_ERROR",
+			wantStatus: http.StatusInternalServerError, wantErrorCode: "INTERNAL_ERROR",
 		},
 	}
 
@@ -365,7 +366,7 @@ func TestTwoFactorHandlerDisableRejectsAMissingPassword(t *testing.T) {
 
 	recorder := performTwoFactorRequest(t, serviceStub, http.MethodPost, "/v1/me/2fa/disable", `{}`)
 
-	assertAPIError(t, recorder, http.StatusBadRequest, "INVALID_INPUT")
+	assertAPIError(t, recorder, http.StatusBadRequest, "INVALID_BODY")
 	if serviceStub.called {
 		t.Fatal("the service must not be called without a password")
 	}
@@ -435,7 +436,7 @@ func assertAPIError(t *testing.T, recorder *httptest.ResponseRecorder, wantStatu
 		t.Fatalf("status = %d, want %d (body = %s)", recorder.Code, wantStatus, recorder.Body.String())
 	}
 
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != wantErrorCode {
 		t.Fatalf("error code = %q, want %q", response.Error.Code, wantErrorCode)
