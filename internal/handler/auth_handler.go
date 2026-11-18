@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
@@ -34,20 +35,15 @@ func NewAuthHandler(service service.AuthService) *AuthHandler {
 // @Produce      json
 // @Param        body  body  model.RegisterRequest  true  "Name, email and password"
 // @Success      201  {object}  model.UserResponse
-// @Failure      400  {object}  model.ErrorResponse  "invalid input, or insecure password"
-// @Failure      409  {object}  model.ErrorResponse  "email already in use"
+// @Failure      400  {object}  apierr.ErrorResponse  "invalid input, or insecure password"
+// @Failure      409  {object}  apierr.ErrorResponse  "email already in use"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/users [post]
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.RegisterRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error: model.APIError{
-				Code:    "INVALID_INPUT",
-				Message: "Formato de petición o correo electrónico inválido",
-				Details: map[string]any{"reason": err.Error()},
-			},
-		})
+		apierr.InvalidBodyFromBinding(c, "Formato de petición o correo electrónico inválido", err)
 		return
 	}
 
@@ -56,46 +52,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		switch {
 
 		case errors.Is(err, service.ErrPasswordInsecure):
-			c.JSON(http.StatusBadRequest, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INSECURE_PASSWORD",
-					Message: err.Error(),
-					Details: map[string]any{
-						"min_length":         8,
-						"requires_uppercase": true,
-						"requires_lowercase": true,
-						"requires_number":    true,
-					},
-				},
+			apierr.Abort(c, http.StatusBadRequest, apierr.CodeInsecurePassword, err.Error(), map[string]any{
+				"min_length":         8,
+				"requires_uppercase": true,
+				"requires_lowercase": true,
+				"requires_number":    true,
 			})
 
 		case errors.Is(err, service.ErrEmailInUse):
-			c.JSON(http.StatusConflict, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "EMAIL_ALREADY_EXISTS",
-					Message: err.Error(),
-				},
-			})
+			apierr.Abort(c, http.StatusConflict, apierr.CodeEmailAlreadyExists, err.Error(), nil)
 
 		case errors.Is(err, service.ErrInvalidProfileName):
-			c.JSON(http.StatusBadRequest, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INVALID_PROFILE",
-					Message: err.Error(),
-					Details: map[string]any{
-						"field":      "name",
-						"max_length": service.MaxNameRunes,
-					},
-				},
+			apierr.Abort(c, http.StatusBadRequest, apierr.CodeInvalidProfile, err.Error(), map[string]any{
+				"field":      "name",
+				"max_length": service.MaxNameRunes,
 			})
 
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INTERNAL_SERVER_ERROR",
-					Message: "Ha ocurrido un error inesperado en el servidor",
-				},
-			})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -111,21 +85,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        body  body  model.SetPasswordRequest  true  "New password"
 // @Success      204  "no content"
-// @Failure      400  {object}  model.ErrorResponse  "missing password, or insecure password"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      409  {object}  model.ErrorResponse  "the account already has a password"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing password, or insecure password"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      409  {object}  apierr.ErrorResponse  "the account already has a password"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/password [post]
 func (h *AuthHandler) SetPassword(c *gin.Context) {
 	var req model.SetPasswordRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error: model.APIError{
-				Code:    "INVALID_INPUT",
-				Message: "Falta la contraseña",
-				Details: map[string]any{"reason": err.Error()},
-			},
-		})
+		apierr.InvalidBodyFromBinding(c, "Falta la contraseña", err)
 		return
 	}
 
@@ -134,32 +103,16 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 	if err := h.service.SetPassword(c.Request.Context(), userID, req.Password); err != nil {
 		switch {
 		case errors.Is(err, service.ErrPasswordInsecure):
-			c.JSON(http.StatusBadRequest, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INSECURE_PASSWORD",
-					Message: err.Error(),
-					Details: map[string]any{
-						"min_length":         8,
-						"requires_uppercase": true,
-						"requires_lowercase": true,
-						"requires_number":    true,
-					},
-				},
+			apierr.Abort(c, http.StatusBadRequest, apierr.CodeInsecurePassword, err.Error(), map[string]any{
+				"min_length":         8,
+				"requires_uppercase": true,
+				"requires_lowercase": true,
+				"requires_number":    true,
 			})
 		case errors.Is(err, service.ErrPasswordAlreadySet):
-			c.JSON(http.StatusConflict, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "PASSWORD_ALREADY_SET",
-					Message: err.Error(),
-				},
-			})
+			apierr.Abort(c, http.StatusConflict, apierr.CodePasswordAlreadySet, err.Error(), nil)
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INTERNAL_SERVER_ERROR",
-					Message: "Ha ocurrido un error inesperado en el servidor",
-				},
-			})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -230,22 +183,17 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Param        body  body  model.LoginRequest  true  "Email and password"
 // @Success      200  {object}  model.AuthResponse  "no two-factor on this account: session granted"
 // @Success      202  {object}  model.TwoFactorChallengeResponse  "two-factor enabled: accepted, continue at POST /v1/login/2fa"
-// @Failure      400  {object}  model.ErrorResponse
-// @Failure      401  {object}  model.ErrorResponse  "wrong email/password"
-// @Failure      429  {object}  model.ErrorResponse  "too many failed login attempts; includes Retry-After"
-// @Failure      403  {object}  model.ErrorResponse  "email not verified yet (EMAIL_NOT_VERIFIED), or the account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      400  {object}  apierr.ErrorResponse
+// @Failure      401  {object}  apierr.ErrorResponse  "wrong email/password"
+// @Failure      429  {object}  apierr.ErrorResponse  "too many failed login attempts; includes Retry-After"
+// @Failure      403  {object}  apierr.ErrorResponse  "email not verified yet (EMAIL_NOT_VERIFIED), or the account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req model.LoginRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error: model.APIError{
-				Code:    "INVALID_INPUT",
-				Message: "Formato de petición o correo electrónico inválido",
-				Details: map[string]any{"reason": err.Error()},
-			},
-		})
+		apierr.InvalidBodyFromBinding(c, "Formato de petición o correo electrónico inválido", err)
 		return
 	}
 	req.IP = c.ClientIP()
@@ -254,42 +202,24 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrEmailNotVerified):
-			c.JSON(http.StatusForbidden, model.ErrorResponse{Error: model.APIError{
-				Code:    "EMAIL_NOT_VERIFIED",
-				Message: "Debes confirmar tu correo electrónico antes de iniciar sesión",
-			}})
+			apierr.Abort(c, http.StatusForbidden, apierr.CodeEmailNotVerified, "Debes confirmar tu correo electrónico antes de iniciar sesión", nil)
 			return
 		case errors.Is(err, service.ErrAccountSuspended):
-			respondAccountSuspended(c)
+			apierr.AccountSuspended(c)
 			return
 		case errors.Is(err, service.ErrInvalidCredentials):
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INVALID_CREDENTIALS",
-					Message: "El correo electrónico o la contraseña son incorrectos",
-				},
-			})
+			apierr.Abort(c, http.StatusUnauthorized, apierr.CodeInvalidCredentials, "El correo electrónico o la contraseña son incorrectos", nil)
 			return
 		case errors.Is(err, service.ErrLoginAttemptsExceeded):
 			var rateLimitErr *service.LoginRateLimitError
 			if errors.As(err, &rateLimitErr) {
 				c.Header("Retry-After", strconv.FormatInt(int64(rateLimitErr.RetryAfter/time.Second), 10))
 			}
-			c.JSON(http.StatusTooManyRequests, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "LOGIN_ATTEMPTS_EXCEEDED",
-					Message: "Demasiados intentos fallidos. Esperá y probá de nuevo",
-				},
-			})
+			apierr.Abort(c, http.StatusTooManyRequests, apierr.CodeLoginAttemptsExceeded, "Demasiados intentos fallidos. Esperá y probá de nuevo", nil)
 			return
 		}
 
-		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
-			Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			},
-		})
+		apierr.Internal(c)
 		return
 	}
 
@@ -311,30 +241,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Tags         auth
 // @Security     BearerAuth
 // @Success      204  "no content"
-// @Failure      401  {object}  model.ErrorResponse  "missing/invalid session cookie, or session expired"
+// @Failure      401  {object}  apierr.ErrorResponse  "missing/invalid session cookie, or session expired"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	refreshToken, err := c.Cookie(refreshCookieName)
 	if err != nil || refreshToken == "" {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
 	if err := h.service.Logout(c.Request.Context(), refreshToken); err != nil {
 		if err == service.ErrInexistentSession {
-			c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-				Code:    "SESSION_EXPIRED",
-				Message: "La sesión expiró o ya no es válida",
-			}})
+			apierr.Abort(c, http.StatusUnauthorized, apierr.CodeSessionExpired, "La sesión expiró o ya no es válida", nil)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-			Code:    "INTERNAL_SERVER_ERROR",
-			Message: "Ha ocurrido un error inesperado en el servidor",
-		}})
+		apierr.Internal(c)
 		return
 	}
 
@@ -348,13 +270,14 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Tags         auth
 // @Produce      json
 // @Success      200  {object}  model.AuthResponse
-// @Failure      401  {object}  model.ErrorResponse  "missing, invalid, reused, or expired refresh token"
-// @Failure      403  {object}  model.ErrorResponse  "the account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      401  {object}  apierr.ErrorResponse  "missing, invalid, reused, or expired refresh token"
+// @Failure      403  {object}  apierr.ErrorResponse  "the account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/refresh [post]
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	refreshToken, err := c.Cookie(refreshCookieName)
 	if err != nil || refreshToken == "" {
-		respondSessionExpired(c)
+		apierr.Unauthorized(c)
 		return
 	}
 
@@ -363,17 +286,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrAccountSuspended):
 			clearRefreshCookie(c)
-			respondAccountSuspended(c)
+			apierr.AccountSuspended(c)
 		case errors.Is(err, service.ErrInvalidRefreshToken), errors.Is(err, service.ErrRefreshReused):
 			clearRefreshCookie(c)
-			respondSessionExpired(c)
+			apierr.SessionExpired(c, map[string]any{"redirect_to": "/v1/login"})
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{
-				Error: model.APIError{
-					Code:    "INTERNAL_SERVER_ERROR",
-					Message: "Ha ocurrido un error inesperado en el servidor",
-				},
-			})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -391,25 +309,4 @@ func setRefreshCookie(c *gin.Context, refreshToken string) {
 func clearRefreshCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie(refreshCookieName, "", -1, refreshCookiePath, "", true, true)
-}
-
-// respondAccountSuspended: 403 ACCOUNT_SUSPENDED, el mismo cuerpo que da
-// RequireAuth para un access token vigente de una cuenta suspendida.
-func respondAccountSuspended(c *gin.Context) {
-	c.JSON(http.StatusForbidden, model.ErrorResponse{
-		Error: model.APIError{
-			Code:    "ACCOUNT_SUSPENDED",
-			Message: "Tu cuenta está suspendida",
-		},
-	})
-}
-
-func respondSessionExpired(c *gin.Context) {
-	c.JSON(http.StatusUnauthorized, model.ErrorResponse{
-		Error: model.APIError{
-			Code:    "SESSION_EXPIRED",
-			Message: "La sesión expiró o ya no es válida",
-			Details: map[string]any{"redirect_to": "/v1/login"},
-		},
-	})
 }

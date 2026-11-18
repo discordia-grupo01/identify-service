@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/repository"
 	"github.com/discordia-grupo01/identify-service/internal/utils/googleoauth"
@@ -32,7 +33,7 @@ func requireAccountSuspended(t *testing.T, recorder *httptest.ResponseRecorder) 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (body = %s)", recorder.Code, recorder.Body.String())
 	}
-	var body model.ErrorResponse
+	var body apierr.ErrorResponse
 	decodeJSON(t, recorder, &body)
 	if body.Error.Code != "ACCOUNT_SUSPENDED" {
 		t.Fatalf("error code = %q, want ACCOUNT_SUSPENDED", body.Error.Code)

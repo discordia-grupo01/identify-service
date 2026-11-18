@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/logging"
 	"github.com/discordia-grupo01/identify-service/internal/middleware"
 	"github.com/discordia-grupo01/identify-service/internal/model"
@@ -31,16 +32,14 @@ func NewProfileHandler(profileService service.ProfileService) *ProfileHandler {
 // @Produce      json
 // @Security     BearerAuth
 // @Success      200  {object}  model.UserResponse
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      404  {object}  model.ErrorResponse
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      404  {object}  apierr.ErrorResponse
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/profile [get]
 func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
@@ -48,15 +47,9 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
-				Code:    "USER_NOT_FOUND",
-				Message: "El usuario no existe",
-			}})
+			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			}})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -71,27 +64,22 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "Target user's ID"
 // @Success      200  {object}  model.PublicUserResponse
-// @Failure      400  {object}  model.ErrorResponse  "invalid user id"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      403  {object}  model.ErrorResponse  "the caller's own account is suspended (ACCOUNT_SUSPENDED)"
-// @Failure      404  {object}  model.ErrorResponse  "no such user, or the user is suspended"
+// @Failure      400  {object}  apierr.ErrorResponse  "invalid user id"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      403  {object}  apierr.ErrorResponse  "the caller's own account is suspended (ACCOUNT_SUSPENDED)"
+// @Failure      404  {object}  apierr.ErrorResponse  "no such user, or the user is suspended"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/users/{id} [get]
 func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 	viewerUserID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
 	targetUserID := c.Param("id")
 	if _, err := uuid.Parse(targetUserID); err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-			Code:    "INVALID_USER_ID",
-			Message: "El id de usuario no es válido",
-		}})
+		apierr.InvalidParameter(c, "id", "El id de usuario no es válido")
 		return
 	}
 
@@ -99,15 +87,9 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
-				Code:    "USER_NOT_FOUND",
-				Message: "El usuario no existe",
-			}})
+			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			}})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -126,17 +108,15 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 // @Param        image        formData  file    false  "New profile image (JPEG, PNG or WebP, up to 5 MiB)"
 // @Param        remove_image formData  boolean false  "Remove the current profile image"
 // @Success      200  {object}  model.UserResponse
-// @Failure      400  {object}  model.ErrorResponse  "invalid name/description/image"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      404  {object}  model.ErrorResponse
+// @Failure      400  {object}  apierr.ErrorResponse  "invalid name/description/image"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      404  {object}  apierr.ErrorResponse
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/profile [patch]
 func (h *ProfileHandler) Update(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
@@ -187,16 +167,10 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 		case errors.Is(err, service.ErrInvalidProfileName), errors.Is(err, service.ErrInvalidProfileDescription), errors.Is(err, service.ErrInvalidProfileImage):
 			writeProfileInputError(c, err)
 		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
-				Code:    "USER_NOT_FOUND",
-				Message: "El usuario no existe",
-			}})
+			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 		default:
 			logging.Errorf("profile update failed for user %v: %v", userID, err)
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			}})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -205,10 +179,7 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 }
 
 func writeProfileInputError(c *gin.Context, err error) {
-	c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-		Code:    "INVALID_PROFILE",
-		Message: err.Error(),
-	}})
+	apierr.Abort(c, http.StatusBadRequest, apierr.CodeInvalidProfile, err.Error(), nil)
 }
 
 // UpdateStatus godoc
@@ -220,23 +191,21 @@ func writeProfileInputError(c *gin.Context, err error) {
 // @Security     BearerAuth
 // @Param        body  body  model.StatusUpdateRequest  true  "Status text and/or emoji"
 // @Success      200  {object}  model.UserResponse
-// @Failure      400  {object}  model.ErrorResponse  "invalid text/emoji, or no changes"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      404  {object}  model.ErrorResponse
+// @Failure      400  {object}  apierr.ErrorResponse  "invalid text/emoji, or no changes"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      404  {object}  apierr.ErrorResponse
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/status [put]
 func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
 	var request model.StatusUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		writeStatusInputError(c, errors.New("el cuerpo de la petición no es un JSON válido"))
+		apierr.InvalidBodyFromBinding(c, "El cuerpo de la petición no es un JSON válido", err)
 		return
 	}
 
@@ -246,15 +215,9 @@ func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 		case errors.Is(err, service.ErrNoStatusChanges), errors.Is(err, service.ErrInvalidStatusText), errors.Is(err, service.ErrInvalidStatusEmoji):
 			writeStatusInputError(c, err)
 		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
-				Code:    "USER_NOT_FOUND",
-				Message: "El usuario no existe",
-			}})
+			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			}})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -267,31 +230,23 @@ func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 // @Tags         profile
 // @Security     BearerAuth
 // @Success      204  "no content"
-// @Failure      401  {object}  model.ErrorResponse
-// @Failure      404  {object}  model.ErrorResponse
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      404  {object}  apierr.ErrorResponse
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/status [delete]
 func (h *ProfileHandler) DeleteStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.ErrorResponse{Error: model.APIError{
-			Code:    "UNAUTHORIZED",
-			Message: "La sesión no es válida",
-		}})
+		apierr.Unauthorized(c)
 		return
 	}
 
 	if err := h.service.ClearStatus(c.Request.Context(), userID.(string)); err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, model.ErrorResponse{Error: model.APIError{
-				Code:    "USER_NOT_FOUND",
-				Message: "El usuario no existe",
-			}})
+			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 		default:
-			c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: model.APIError{
-				Code:    "INTERNAL_SERVER_ERROR",
-				Message: "Ha ocurrido un error inesperado en el servidor",
-			}})
+			apierr.Internal(c)
 		}
 		return
 	}
@@ -300,8 +255,5 @@ func (h *ProfileHandler) DeleteStatus(c *gin.Context) {
 }
 
 func writeStatusInputError(c *gin.Context, err error) {
-	c.JSON(http.StatusBadRequest, model.ErrorResponse{Error: model.APIError{
-		Code:    "INVALID_STATUS",
-		Message: err.Error(),
-	}})
+	apierr.Abort(c, http.StatusBadRequest, apierr.CodeInvalidStatus, err.Error(), nil)
 }

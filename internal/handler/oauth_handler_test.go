@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/discordia-grupo01/identify-service/internal/apierr"
 	"github.com/discordia-grupo01/identify-service/internal/model"
 	"github.com/discordia-grupo01/identify-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -121,7 +122,7 @@ func TestOAuthHandlerLoginWithGoogleMapsProviderUnavailableToServiceUnavailable(
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d (CA3: el cliente debe ofrecer login con email/contrasena)", recorder.Code, http.StatusServiceUnavailable)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "OAUTH_PROVIDER_UNAVAILABLE" {
 		t.Fatalf("error code = %q, want OAUTH_PROVIDER_UNAVAILABLE", response.Error.Code)
@@ -136,7 +137,7 @@ func TestOAuthHandlerLoginWithGoogleMapsInvalidTokenToUnauthorized(t *testing.T)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
-	var response model.ErrorResponse
+	var response apierr.ErrorResponse
 	decodeJSON(t, recorder, &response)
 	if response.Error.Code != "OAUTH_TOKEN_INVALID" {
 		t.Fatalf("error code = %q, want OAUTH_TOKEN_INVALID", response.Error.Code)

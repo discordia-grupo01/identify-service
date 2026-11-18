@@ -71,13 +71,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "429":
           description: too many requests for this email
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Request an email confirmation link
       tags:
         - auth
@@ -104,7 +110,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Confirm an email address using its token
       tags:
         - auth
@@ -140,26 +152,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: wrong email/password
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: email not verified yet (EMAIL_NOT_VERIFIED), or the account is
             suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "429":
           description: too many failed login attempts; includes Retry-After
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Log in with email and password
       tags:
         - auth
@@ -190,26 +208,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: wrong/expired code, or the challenge itself expired/was already used
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: the account was suspended after the challenge was issued
             (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "429":
           description: too many failed attempts on this challenge
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Complete a login that requires two-factor
       tags:
         - two-factor
@@ -241,27 +265,33 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: the challenge expired, was already used or doesn't exist
             (TWO_FACTOR_CHALLENGE_EXPIRED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: the account is suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: the user already has a pending request
             (ACCOUNT_RECOVERY_ALREADY_PENDING)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Ask staff to recover an account that lost its second factor
       tags:
         - two-factor
@@ -277,7 +307,13 @@ paths:
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Log out
@@ -299,7 +335,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Get the account's two-factor status
@@ -329,19 +371,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: no pending setup, or 2FA is already enabled
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Confirm the QR and activate two-factor authentication
@@ -362,26 +410,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: wrong password -- not 401, so the front doesn't treat it as an
             expired session
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: 2FA is not enabled on this account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Disable two-factor authentication
@@ -406,25 +460,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: wrong password
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: 2FA is not enabled on this account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Regenerate the recovery code list
@@ -450,14 +510,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: 2FA is already enabled on this account, or the account has no
             password yet
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Start setting up two-factor authentication
@@ -484,19 +550,25 @@ paths:
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: the account already has a password
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Set the account's initial password
@@ -561,13 +633,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: Not Found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Get my own profile
@@ -606,19 +684,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: Not Found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Edit my own profile
@@ -634,13 +718,19 @@ paths:
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: Not Found
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Clear my custom status
@@ -667,19 +757,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: Not Found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Set my custom status
@@ -717,25 +813,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: token could not be validated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: the account is suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "503":
           description: Google unreachable
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Log in / sign up with Google
       tags:
         - auth
@@ -764,13 +866,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "429":
           description: too many requests for this email
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Request a password recovery email
       tags:
         - auth
@@ -797,7 +905,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Reset the password using a recovery token
       tags:
         - auth
@@ -820,13 +934,19 @@ paths:
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             "*/*":
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Set up a device PIN
@@ -865,27 +985,33 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: PIN not configured, incorrect, or malformed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: email not verified yet (EMAIL_NOT_VERIFIED), or the account is
             suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "423":
           description: "too many failed PIN attempts: temporarily locked, fall back to
             email+password"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Log in with a device PIN
       tags:
         - auth
@@ -906,13 +1032,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: the account is suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Refresh the access token
       tags:
         - auth
@@ -939,13 +1071,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: email already in use
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       summary: Register a new account
       tags:
         - auth
@@ -972,25 +1110,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: the caller's own account is suspended (ACCOUNT_SUSPENDED)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: no such user, or the user is suspended
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/model.ErrorResponse"
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: unexpected error (INTERNAL_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
         - BearerAuth: []
       summary: Get another user's public profile
@@ -1014,6 +1158,28 @@ components:
       name: Authorization
       type: apiKey
   schemas:
+    apierr.Body:
+      properties:
+        code:
+          example: FORBIDDEN
+          type: string
+        details:
+          additionalProperties: {}
+          type: object
+        message:
+          type: string
+      required:
+        - code
+        - details
+        - message
+      type: object
+    apierr.ErrorResponse:
+      properties:
+        error:
+          $ref: "#/components/schemas/apierr.Body"
+      required:
+        - error
+      type: object
     handler.googleLoginRequest:
       properties:
         id_token:
@@ -1021,16 +1187,6 @@ components:
           type: string
       required:
         - id_token
-      type: object
-    model.APIError:
-      properties:
-        code:
-          type: string
-        details:
-          additionalProperties: {}
-          type: object
-        message:
-          type: string
       type: object
     model.AccountRecoveryCreateRequest:
       properties:
@@ -1125,11 +1281,6 @@ components:
           type: string
       required:
         - token
-      type: object
-    model.ErrorResponse:
-      properties:
-        error:
-          $ref: "#/components/schemas/model.APIError"
       type: object
     model.LoginRequest:
       properties:
