@@ -35,10 +35,15 @@ type UserRepository interface {
 	// de un read-modify-write hecho en aplicación. Devuelve el usuario ya
 	// actualizado, o nil si userID no existe.
 	UpdateStatus(ctx context.Context, userID string, statusText *string, statusEmoji *string) (*model.User, error)
-	// UpdatePasswordHash setea la contraseña de una cuenta que nunca tuvo una
-	// (alta puramente federada por Google): a diferencia del reset de
-	// contraseña, no depende de un token por mail.
+	// UpdatePasswordHash pisa la contraseña de una cuenta autenticada, tenga o
+	// no una previa: a diferencia del reset de contraseña, no depende de un
+	// token por mail.
 	UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error
+	// ReplacePasswordHash cambia la contraseña y revoca, en la misma
+	// transacción, los refresh tokens de todas las sesiones salvo keepSessionID
+	// (el family_id de la sesión que hizo el cambio). Con keepSessionID vacío
+	// revoca todas.
+	ReplacePasswordHash(ctx context.Context, userID string, passwordHash string, keepSessionID string) error
 	// ApplySuspension aplica un admin.user_suspended (suspended = true,
 	// suspendedAt = occurred_at del evento) o un admin.user_reactivated
 	// (suspended = false) solo si version es mayor a suspension_version: un
@@ -167,6 +172,30 @@ func (r *postgresUserRepository) UpdatePasswordHash(ctx context.Context, userID 
 		SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2`, passwordHash, userID)
 	return err
+}
+
+func (r *postgresUserRepository) ReplacePasswordHash(ctx context.Context, userID string, passwordHash string, keepSessionID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2`, passwordHash, userID); err != nil {
+		return err
+	}
+	if keepSessionID == "" {
+		err = revokeAllForUser(ctx, tx, userID)
+	} else {
+		err = revokeAllForUserExcept(ctx, tx, userID, keepSessionID)
+	}
+	if err != nil {
+		return fmt.Errorf("revoke refresh tokens: %w", err)
+	}
+	return tx.Commit()
 }
 
 type postgresUserRepository struct {

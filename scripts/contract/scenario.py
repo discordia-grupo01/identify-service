@@ -30,6 +30,7 @@ RUN = uuid.uuid4().hex[:10]
 EMAIL = f"scenario-{RUN}@example.test"
 PASSWORD = "Contract-Pass1"
 NEW_PASSWORD = "Contract-Pass2"
+CHANGED_PASSWORD = "Contract-Pass3"
 DEVICE = f"device-{RUN}"
 PIN = "123456"
 
@@ -137,6 +138,16 @@ def main():
     )
     response = call("POST", "/v1/login", 200, {"email": EMAIL, "password": NEW_PASSWORD})
     token, refresh = response.json()["token"], refresh_from(response)
+
+    # Cambio de contrasena con la actual y login con la nueva.
+    call(
+        "PUT",
+        "/v1/me/password",
+        204,
+        {"current_password": NEW_PASSWORD, "new_password": CHANGED_PASSWORD, "confirm_password": CHANGED_PASSWORD},
+        bearer=token,
+    )
+    call("POST", "/v1/login", 200, {"email": EMAIL, "password": CHANGED_PASSWORD})
 
     # Cuenta sin contrasena (la del usuario sembrado, como las de Google): fijar una.
     call("POST", "/v1/me/password", 204, {"password": PASSWORD}, bearer=os.environ["CONTRACT_USER_TOKEN"])

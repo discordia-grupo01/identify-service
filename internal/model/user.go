@@ -66,6 +66,12 @@ type SetPasswordRequest struct {
 	Password string `json:"password" binding:"required" minLength:"1"`
 }
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required" minLength:"1"`
+	NewPassword     string `json:"new_password" binding:"required" minLength:"1"`
+	ConfirmPassword string `json:"confirm_password" binding:"required" minLength:"1"`
+}
+
 type PasswordResetRequest struct {
 	Token           string `json:"token" binding:"required" minLength:"1"`
 	NewPassword     string `json:"new_password" binding:"required" minLength:"1"`
@@ -79,16 +85,18 @@ type AuthResponse struct {
 }
 
 type UserResponse struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Email         string    `json:"email"`
-	Description   string    `json:"description"`
-	AvatarURL     string    `json:"avatar_url"`
-	StatusText    string    `json:"status_text"`
-	StatusEmoji   string    `json:"status_emoji"`
-	EmailVerified bool      `json:"email_verified"`
-	Premium       bool      `json:"premium"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	Description   string `json:"description"`
+	AvatarURL     string `json:"avatar_url"`
+	StatusText    string `json:"status_text"`
+	StatusEmoji   string `json:"status_emoji"`
+	EmailVerified bool   `json:"email_verified"`
+	Premium       bool   `json:"premium"`
+	// HasPassword es false en una cuenta creada solo con Google que todavía no definió contraseña.
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type RefreshToken struct {
@@ -144,6 +152,7 @@ func NewUserResponse(user *User) *UserResponse {
 		StatusEmoji:   user.StatusEmoji,
 		EmailVerified: user.EmailVerified,
 		Premium:       user.PremiumActive,
+		HasPassword:   user.PasswordHash.Valid,
 		CreatedAt:     user.CreatedAt.UTC(),
 	}
 }

@@ -87,6 +87,14 @@ func revokeAllForUser(ctx context.Context, db execer, userID string) error {
 	return err
 }
 
+func revokeAllForUserExcept(ctx context.Context, db execer, userID string, keepFamilyID string) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE refresh_tokens
+		SET revoked_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND family_id <> $2 AND revoked_at IS NULL`, userID, keepFamilyID)
+	return err
+}
+
 func (r *postgresRefreshTokenRepository) Create(ctx context.Context, refreshHash string, userID string, familyID string, expiresAt time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO refresh_tokens (user_id, family_id, token_hash, expires_at)

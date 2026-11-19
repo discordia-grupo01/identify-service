@@ -196,6 +196,44 @@ func TestRequireAuthRejectsWrongSigningMethod(t *testing.T) {
 	}
 }
 
+func TestRequireAuthSetsSessionIDWhenTheTokenHasOne(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "550e8400-e29b-41d4-a716-446655440000",
+		"sid": "7d1c6c1e-0000-4000-8000-000000000001",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("SignedString() error: %v", err)
+	}
+
+	for name, tc := range map[string]struct {
+		header string
+		want   string
+	}{
+		"with sid":    {header: "Bearer " + signed, want: "7d1c6c1e-0000-4000-8000-000000000001"},
+		"without sid": {header: "Bearer " + signedToken(t, "550e8400-e29b-41d4-a716-446655440000", time.Now().Add(time.Hour)), want: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
+			request.Header.Set("Authorization", tc.header)
+
+			var captured string
+			router := gin.New()
+			router.GET("/v1/private", RequireAuth(nil), func(c *gin.Context) {
+				captured = c.GetString(SessionIDKey)
+				c.Status(http.StatusNoContent)
+			})
+			router.ServeHTTP(httptest.NewRecorder(), request)
+
+			if captured != tc.want {
+				t.Fatalf("SessionIDKey = %q, want %q", captured, tc.want)
+			}
+		})
+	}
+}
+
 func signedToken(t *testing.T, userID string, expiresAt time.Time) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

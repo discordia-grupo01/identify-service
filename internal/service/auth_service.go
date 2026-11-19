@@ -30,6 +30,8 @@ var (
 	ErrRefreshReused         = errors.New("el token de actualización ha sido reutilizado y ha sido revocado")
 	ErrLoginAttemptsExceeded = errors.New("demasiados intentos fallidos, esperá unos minutos y probá de nuevo")
 	ErrPasswordAlreadySet    = errors.New("la cuenta ya tiene una contraseña configurada")
+	ErrPasswordNotSet        = errors.New("la cuenta todavía no tiene una contraseña configurada")
+	ErrSamePassword          = errors.New("la nueva contraseña tiene que ser distinta de la actual")
 	ErrAccountSuspended      = model.ErrAccountSuspended
 )
 
@@ -68,6 +70,11 @@ type AuthService interface {
 	// puramente federada por Google): sin esto, esa cuenta no puede activar
 	// 2FA, porque no tendria como reingresarla para desactivarlo despues.
 	SetPassword(ctx context.Context, userID string, password string) error
+	// ChangePassword reemplaza la contraseña de una cuenta que ya tiene una,
+	// pidiendo la actual.
+	// ChangePassword cierra las demás sesiones de la cuenta; sessionID es la
+	// que hizo el cambio y queda abierta.
+	ChangePassword(ctx context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error
 }
 
 type EmailConfirmationRequester interface {
@@ -277,6 +284,38 @@ func (s *authService) SetPassword(ctx context.Context, userID string, password s
 	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
 }
 
+func (s *authService) ChangePassword(ctx context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if !user.PasswordHash.Valid {
+		return ErrPasswordNotSet
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.CurrentPassword)) != nil {
+		return ErrPasswordMismatch
+	}
+	if req.NewPassword != req.ConfirmPassword {
+		return ErrPasswordsDoNotMatch
+	}
+	if !validatePassword(req.NewPassword) {
+		return ErrPasswordInsecure
+	}
+	if req.NewPassword == req.CurrentPassword {
+		return ErrSamePassword
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.ReplacePasswordHash(ctx, userID, string(hashedPassword), sessionID)
+}
+
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {
 	hash := hashToken(refreshToken)
 	if err := s.refreshRepo.RevokeByHash(ctx, hash); err != nil {
@@ -341,11 +380,14 @@ func validatePassword(password string) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
-func generateAccessJWT(userID string) (string, error) {
+// generateAccessJWT firma el access token. sid es el family_id de la sesión,
+// para poder cerrar las demás sesiones sin cerrar la que hace la request.
+func generateAccessJWT(userID string, sessionID string) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
 		"sub": userID,
+		"sid": sessionID,
 		"jti": uuid.NewString(),
 		"exp": time.Now().Add(AccessTokenTTL).Unix(),
 	}
@@ -382,7 +424,7 @@ func issueTokenPair(ctx context.Context, refreshRepo repository.RefreshTokenRepo
 	if user.SuspendedAt != nil {
 		return nil, ErrAccountSuspended
 	}
-	accessToken, err := generateAccessJWT(user.ID)
+	accessToken, err := generateAccessJWT(user.ID, familyID)
 	if err != nil {
 		return nil, err
 	}

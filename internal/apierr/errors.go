@@ -36,6 +36,8 @@ const (
 	CodeInsecurePassword              = "INSECURE_PASSWORD"
 	CodeEmailAlreadyExists            = "EMAIL_ALREADY_EXISTS"
 	CodePasswordAlreadySet            = "PASSWORD_ALREADY_SET"
+	CodePasswordNotSet                = "PASSWORD_NOT_SET"
+	CodeSamePassword                  = "SAME_PASSWORD"
 	CodeInvalidProfile                = "INVALID_PROFILE"
 	CodeInvalidStatus                 = "INVALID_STATUS"
 	CodeUserNotFound                  = "USER_NOT_FOUND"

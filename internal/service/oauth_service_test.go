@@ -61,6 +61,10 @@ func (r *oauthUserRepositoryStub) UpdatePasswordHash(_ context.Context, _ string
 	return nil
 }
 
+func (r *oauthUserRepositoryStub) ReplacePasswordHash(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
 func (r *oauthUserRepositoryStub) ApplySuspension(_ context.Context, _ string, _ bool, _ time.Time, _ int64) (repository.SuspensionResult, error) {
 	return repository.SuspensionApplied, nil
 }

@@ -34,6 +34,11 @@ type authServiceStub struct {
 		userID   string
 		password string
 	}
+	changePasswordCalls []struct {
+		userID    string
+		sessionID string
+		req       model.ChangePasswordRequest
+	}
 }
 
 var _ service.AuthService = (*authServiceStub)(nil)
@@ -67,6 +72,15 @@ func (s *authServiceStub) SetPassword(_ context.Context, userID string, password
 		userID   string
 		password string
 	}{userID: userID, password: password})
+	return s.err
+}
+
+func (s *authServiceStub) ChangePassword(_ context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error {
+	s.changePasswordCalls = append(s.changePasswordCalls, struct {
+		userID    string
+		sessionID string
+		req       model.ChangePasswordRequest
+	}{userID: userID, sessionID: sessionID, req: req})
 	return s.err
 }
 
@@ -491,6 +505,79 @@ func TestAuthHandlerSetPasswordMapsAlreadySetToConflict(t *testing.T) {
 	}
 }
 
+const testSessionID = "7d1c6c1e-0000-4000-8000-000000000001"
+
+const validChangePasswordBody = `{"current_password":"Current123","new_password":"Secure123","confirm_password":"Secure123"}`
+
+func TestAuthHandlerChangePasswordUpdatesPasswordForTheAuthenticatedUser(t *testing.T) {
+	serviceStub := &authServiceStub{}
+
+	recorder := performChangePasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", validChangePasswordBody)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+	if len(serviceStub.changePasswordCalls) != 1 {
+		t.Fatalf("ChangePassword() calls = %d, want 1", len(serviceStub.changePasswordCalls))
+	}
+	call := serviceStub.changePasswordCalls[0]
+	want := model.ChangePasswordRequest{CurrentPassword: "Current123", NewPassword: "Secure123", ConfirmPassword: "Secure123"}
+	if call.userID != "550e8400-e29b-41d4-a716-446655440000" || call.sessionID != testSessionID || call.req != want {
+		t.Fatalf("unexpected call: %+v", call)
+	}
+}
+
+func TestAuthHandlerChangePasswordRejectsMissingFields(t *testing.T) {
+	serviceStub := &authServiceStub{}
+
+	recorder := performChangePasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", `{"new_password":"Secure123","confirm_password":"Secure123"}`)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var response apierr.ErrorResponse
+	decodeJSON(t, recorder, &response)
+	if response.Error.Code != "INVALID_BODY" || response.Error.Details["field"] != "current_password" {
+		t.Fatalf("error = %+v, want INVALID_BODY on current_password", response.Error)
+	}
+	if len(serviceStub.changePasswordCalls) != 0 {
+		t.Fatal("service must not be called without the current password")
+	}
+}
+
+func TestAuthHandlerChangePasswordMapsServiceErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{"no password yet", service.ErrPasswordNotSet, http.StatusConflict, "PASSWORD_NOT_SET"},
+		{"wrong current password", service.ErrPasswordMismatch, http.StatusForbidden, "INVALID_PASSWORD"},
+		{"confirmation mismatch", service.ErrPasswordsDoNotMatch, http.StatusBadRequest, "PASSWORDS_DO_NOT_MATCH"},
+		{"insecure password", service.ErrPasswordInsecure, http.StatusBadRequest, "INSECURE_PASSWORD"},
+		{"same password", service.ErrSamePassword, http.StatusBadRequest, "SAME_PASSWORD"},
+		{"unexpected error", errors.New("boom"), http.StatusInternalServerError, "INTERNAL_ERROR"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			serviceStub := &authServiceStub{err: tc.err}
+
+			recorder := performChangePasswordRequest(t, serviceStub, "550e8400-e29b-41d4-a716-446655440000", validChangePasswordBody)
+
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tc.wantStatus)
+			}
+			var response apierr.ErrorResponse
+			decodeJSON(t, recorder, &response)
+			if response.Error.Code != tc.wantCode {
+				t.Fatalf("error code = %q, want %s", response.Error.Code, tc.wantCode)
+			}
+		})
+	}
+}
+
 func performRegisterRequest(t *testing.T, authService service.AuthService, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -604,4 +691,23 @@ func TestAuthHandlerLoginInvalidBodyDoesNotExposeBindingError(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), "Key:") {
 		t.Fatalf("body leaks the validator error: %s", recorder.Body.String())
 	}
+}
+
+func performChangePasswordRequest(t *testing.T, authService service.AuthService, userID string, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/v1/me/password", jsonBody(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	router := gin.New()
+	router.PUT("/v1/me/password", func(c *gin.Context) {
+		if userID != "" {
+			c.Set(middleware.UserIDKey, userID)
+			c.Set(middleware.SessionIDKey, testSessionID)
+		}
+		NewAuthHandler(authService).ChangePassword(c)
+	})
+	router.ServeHTTP(recorder, request)
+	return recorder
 }
