@@ -2,11 +2,14 @@ package profileimage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/discordia-grupo01/identify-service/internal/circuitbreaker"
 )
 
 func TestSupabaseStorageSaveAndDelete(t *testing.T) {
@@ -128,5 +131,54 @@ func TestSupabaseStorageSaveIgnoresMissingStaleFormats(t *testing.T) {
 func TestNewSupabaseStorageRequiresConfiguration(t *testing.T) {
 	if _, err := NewSupabaseStorage("", "service-role", "profile-images", ""); err == nil {
 		t.Fatal("NewSupabaseStorage() error = nil, want configuration error")
+	}
+}
+
+func TestSupabaseStorageStopsCallingAFailingStorage(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls++
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	storage, err := NewSupabaseStorage(server.URL, "service-role", "profile-images", "")
+	if err != nil {
+		t.Fatalf("NewSupabaseStorage() error = %v", err)
+	}
+
+	for i := 0; i < circuitbreaker.DefaultFailureThreshold; i++ {
+		if _, err := storage.Save(context.Background(), "user-id", []byte("image bytes"), "image/png"); err == nil {
+			t.Fatalf("Save() %d: expected an error", i)
+		}
+	}
+	callsBeforeOpen := calls
+
+	_, err = storage.Save(context.Background(), "user-id", []byte("image bytes"), "image/png")
+
+	if !errors.Is(err, circuitbreaker.ErrOpen) {
+		t.Fatalf("Save() error = %v, want the circuit to be open", err)
+	}
+	if calls != callsBeforeOpen {
+		t.Fatalf("storage was called %d more times while the circuit was open", calls-callsBeforeOpen)
+	}
+}
+
+func TestSupabaseStorageClientErrorsDoNotOpenTheCircuit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	storage, err := NewSupabaseStorage(server.URL, "service-role", "profile-images", "")
+	if err != nil {
+		t.Fatalf("NewSupabaseStorage() error = %v", err)
+	}
+
+	for i := 0; i < circuitbreaker.DefaultFailureThreshold+2; i++ {
+		_, err := storage.Save(context.Background(), "user-id", []byte("image bytes"), "image/png")
+		if errors.Is(err, circuitbreaker.ErrOpen) {
+			t.Fatalf("Save() %d opened the circuit on a client error", i)
+		}
 	}
 }

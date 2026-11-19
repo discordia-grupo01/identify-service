@@ -10,14 +10,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/discordia-grupo01/identify-service/internal/circuitbreaker"
+	"github.com/discordia-grupo01/identify-service/internal/logging"
 )
+
+const storageRequestTimeout = 10 * time.Second
 
 type SupabaseStorage struct {
 	baseURL        string
 	serviceRoleKey string
 	bucket         string
 	publicBaseURL  string
-	httpClient     *http.Client
+	httpClient     circuitbreaker.Doer
 }
 
 func NewSupabaseStorage(supabaseURL, serviceRoleKey, bucket, publicURL string) (*SupabaseStorage, error) {
@@ -39,8 +45,17 @@ func NewSupabaseStorage(supabaseURL, serviceRoleKey, bucket, publicURL string) (
 		serviceRoleKey: serviceRoleKey,
 		bucket:         bucket,
 		publicBaseURL:  publicBaseURL,
-		httpClient:     http.DefaultClient,
+		httpClient:     circuitbreaker.NewHTTPClient(newStorageBreaker(), &http.Client{Timeout: storageRequestTimeout}),
 	}, nil
+}
+
+func newStorageBreaker() *circuitbreaker.Breaker {
+	return circuitbreaker.New(circuitbreaker.Config{
+		Name: "supabase-storage",
+		OnStateChange: func(name string, from, to circuitbreaker.State) {
+			logging.Warnf("circuit_breaker_state_changed name=%s from=%s to=%s", name, from, to)
+		},
+	})
 }
 
 func (s *SupabaseStorage) Save(ctx context.Context, userID string, data []byte, contentType string) (string, error) {
