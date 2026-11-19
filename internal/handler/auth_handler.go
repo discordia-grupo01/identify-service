@@ -122,7 +122,7 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 
 // ChangePassword godoc
 // @Summary      Change the account's password
-// @Description  Replaces the password of an account that already has one, after checking the current one. Accounts without a password (purely federated Google sign-ups) use POST /v1/me/password instead.
+// @Description  Replaces the password of an account that already has one, after checking the current one. Accounts without a password (purely federated Google sign-ups) use POST /v1/me/password instead. On success, every other session of the account is signed out: their refresh tokens are revoked, so each device is logged out once its access token expires (up to 15 minutes). The session that made the change stays open.
 // @Tags         auth
 // @Accept       json
 // @Security     BearerAuth
@@ -141,7 +141,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	err := h.service.ChangePassword(c.Request.Context(), c.GetString(middleware.UserIDKey), req)
+	err := h.service.ChangePassword(c.Request.Context(), c.GetString(middleware.UserIDKey), c.GetString(middleware.SessionIDKey), req)
 	switch {
 	case err == nil:
 		c.Status(http.StatusNoContent)

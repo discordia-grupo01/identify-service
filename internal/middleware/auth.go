@@ -15,6 +15,9 @@ import (
 
 const (
 	UserIDKey = "auth_user_id"
+	// SessionIDKey guarda el claim sid (family_id del refresh token). Los
+	// tokens emitidos antes de que existiera el claim no lo traen.
+	SessionIDKey = "auth_session_id"
 )
 
 // SuspensionChecker dice si una cuenta está suspendida.
@@ -71,6 +74,9 @@ func RequireAuth(checker SuspensionChecker) gin.HandlerFunc {
 		}
 
 		c.Set(UserIDKey, userID)
+		if sessionID, ok := claims["sid"].(string); ok {
+			c.Set(SessionIDKey, sessionID)
+		}
 		c.Next()
 	}
 }

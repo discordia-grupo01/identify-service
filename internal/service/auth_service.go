@@ -72,7 +72,9 @@ type AuthService interface {
 	SetPassword(ctx context.Context, userID string, password string) error
 	// ChangePassword reemplaza la contraseña de una cuenta que ya tiene una,
 	// pidiendo la actual.
-	ChangePassword(ctx context.Context, userID string, req model.ChangePasswordRequest) error
+	// ChangePassword cierra las demás sesiones de la cuenta; sessionID es la
+	// que hizo el cambio y queda abierta.
+	ChangePassword(ctx context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error
 }
 
 type EmailConfirmationRequester interface {
@@ -282,7 +284,7 @@ func (s *authService) SetPassword(ctx context.Context, userID string, password s
 	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
 }
 
-func (s *authService) ChangePassword(ctx context.Context, userID string, req model.ChangePasswordRequest) error {
+func (s *authService) ChangePassword(ctx context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error {
 	user, err := s.repo.GetByID(ctx, userID)
 	if err != nil {
 		return err
@@ -311,7 +313,7 @@ func (s *authService) ChangePassword(ctx context.Context, userID string, req mod
 		return err
 	}
 
-	return s.repo.UpdatePasswordHash(ctx, userID, string(hashedPassword))
+	return s.repo.ReplacePasswordHash(ctx, userID, string(hashedPassword), sessionID)
 }
 
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {
@@ -378,11 +380,14 @@ func validatePassword(password string) bool {
 	return hasUpper && hasLower && hasNumber
 }
 
-func generateAccessJWT(userID string) (string, error) {
+// generateAccessJWT firma el access token. sid es el family_id de la sesión,
+// para poder cerrar las demás sesiones sin cerrar la que hace la request.
+func generateAccessJWT(userID string, sessionID string) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
 		"sub": userID,
+		"sid": sessionID,
 		"jti": uuid.NewString(),
 		"exp": time.Now().Add(AccessTokenTTL).Unix(),
 	}
@@ -419,7 +424,7 @@ func issueTokenPair(ctx context.Context, refreshRepo repository.RefreshTokenRepo
 	if user.SuspendedAt != nil {
 		return nil, ErrAccountSuspended
 	}
-	accessToken, err := generateAccessJWT(user.ID)
+	accessToken, err := generateAccessJWT(user.ID, familyID)
 	if err != nil {
 		return nil, err
 	}

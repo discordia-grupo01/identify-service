@@ -35,8 +35,9 @@ type authServiceStub struct {
 		password string
 	}
 	changePasswordCalls []struct {
-		userID string
-		req    model.ChangePasswordRequest
+		userID    string
+		sessionID string
+		req       model.ChangePasswordRequest
 	}
 }
 
@@ -74,11 +75,12 @@ func (s *authServiceStub) SetPassword(_ context.Context, userID string, password
 	return s.err
 }
 
-func (s *authServiceStub) ChangePassword(_ context.Context, userID string, req model.ChangePasswordRequest) error {
+func (s *authServiceStub) ChangePassword(_ context.Context, userID string, sessionID string, req model.ChangePasswordRequest) error {
 	s.changePasswordCalls = append(s.changePasswordCalls, struct {
-		userID string
-		req    model.ChangePasswordRequest
-	}{userID: userID, req: req})
+		userID    string
+		sessionID string
+		req       model.ChangePasswordRequest
+	}{userID: userID, sessionID: sessionID, req: req})
 	return s.err
 }
 
@@ -503,6 +505,8 @@ func TestAuthHandlerSetPasswordMapsAlreadySetToConflict(t *testing.T) {
 	}
 }
 
+const testSessionID = "7d1c6c1e-0000-4000-8000-000000000001"
+
 const validChangePasswordBody = `{"current_password":"Current123","new_password":"Secure123","confirm_password":"Secure123"}`
 
 func TestAuthHandlerChangePasswordUpdatesPasswordForTheAuthenticatedUser(t *testing.T) {
@@ -518,7 +522,7 @@ func TestAuthHandlerChangePasswordUpdatesPasswordForTheAuthenticatedUser(t *test
 	}
 	call := serviceStub.changePasswordCalls[0]
 	want := model.ChangePasswordRequest{CurrentPassword: "Current123", NewPassword: "Secure123", ConfirmPassword: "Secure123"}
-	if call.userID != "550e8400-e29b-41d4-a716-446655440000" || call.req != want {
+	if call.userID != "550e8400-e29b-41d4-a716-446655440000" || call.sessionID != testSessionID || call.req != want {
 		t.Fatalf("unexpected call: %+v", call)
 	}
 }
@@ -700,6 +704,7 @@ func performChangePasswordRequest(t *testing.T, authService service.AuthService,
 	router.PUT("/v1/me/password", func(c *gin.Context) {
 		if userID != "" {
 			c.Set(middleware.UserIDKey, userID)
+			c.Set(middleware.SessionIDKey, testSessionID)
 		}
 		NewAuthHandler(authService).ChangePassword(c)
 	})

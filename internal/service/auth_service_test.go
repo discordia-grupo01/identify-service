@@ -24,6 +24,7 @@ type userRepositoryStub struct {
 	updatePasswordErr   error
 	updatedPasswordHash string
 	updatedPasswordUser string
+	keptSessionID       string
 }
 
 var _ repository.UserRepository = (*userRepositoryStub)(nil)
@@ -80,6 +81,11 @@ func (r *userRepositoryStub) UpdatePasswordHash(_ context.Context, userID string
 		r.existingUser.PasswordHash = sql.NullString{String: passwordHash, Valid: true}
 	}
 	return nil
+}
+
+func (r *userRepositoryStub) ReplacePasswordHash(ctx context.Context, userID string, passwordHash string, keepSessionID string) error {
+	r.keptSessionID = keepSessionID
+	return r.UpdatePasswordHash(ctx, userID, passwordHash)
 }
 
 func (r *userRepositoryStub) ApplySuspension(_ context.Context, _ string, _ bool, _ time.Time, _ int64) (repository.SuspensionResult, error) {
@@ -892,6 +898,25 @@ func TestAuthServiceRefreshRotatesTokenWithinSameFamily(t *testing.T) {
 	}
 }
 
+func TestAuthServiceAccessTokenCarriesTheSessionAcrossRotations(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	refreshRepo := newRefreshTokenRepositoryStub()
+	repo, login := loginTestUser(t, refreshRepo)
+	familyID := refreshRepo.tokens[hashToken(login.RefreshToken)].familyID
+
+	rotated, err := NewAuthService(repo, refreshRepo).Refresh(context.Background(), login.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	if sid := parseTokenClaims(t, login.Token)["sid"]; sid != familyID {
+		t.Fatalf("login sid = %v, want the refresh token family %q", sid, familyID)
+	}
+	if sid := parseTokenClaims(t, rotated.Token)["sid"]; sid != familyID {
+		t.Fatalf("rotated sid = %v, want the same family %q", sid, familyID)
+	}
+}
+
 func TestAuthServiceRefreshRejectsUnknownToken(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	refreshRepo := newRefreshTokenRepositoryStub()
@@ -1063,7 +1088,7 @@ func TestAuthServiceChangePasswordReplacesTheHash(t *testing.T) {
 	repo := &userRepositoryStub{existingUser: user}
 	svc := NewAuthService(repo, nil)
 
-	err := svc.ChangePassword(context.Background(), user.ID, model.ChangePasswordRequest{
+	err := svc.ChangePassword(context.Background(), user.ID, "7d1c6c1e-0000-4000-8000-000000000001", model.ChangePasswordRequest{
 		CurrentPassword: "Current123",
 		NewPassword:     "Secure123",
 		ConfirmPassword: "Secure123",
@@ -1077,6 +1102,9 @@ func TestAuthServiceChangePasswordReplacesTheHash(t *testing.T) {
 	}
 	if bcrypt.CompareHashAndPassword([]byte(repo.updatedPasswordHash), []byte("Secure123")) != nil {
 		t.Fatal("persisted hash does not match the new password")
+	}
+	if repo.keptSessionID != "7d1c6c1e-0000-4000-8000-000000000001" {
+		t.Fatalf("kept session = %q, want the one that made the change", repo.keptSessionID)
 	}
 }
 
@@ -1130,7 +1158,7 @@ func TestAuthServiceChangePasswordRejections(t *testing.T) {
 			repo := &userRepositoryStub{existingUser: tc.user}
 			svc := NewAuthService(repo, nil)
 
-			err := svc.ChangePassword(context.Background(), "550e8400-e29b-41d4-a716-446655440000", tc.req)
+			err := svc.ChangePassword(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "", tc.req)
 
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("ChangePassword() error = %v, want %v", err, tc.wantErr)
