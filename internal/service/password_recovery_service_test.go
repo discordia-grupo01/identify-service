@@ -63,6 +63,7 @@ func newPasswordRecoveryTestService(repo *passwordRecoveryRepositoryStub, users 
 	service := NewPasswordRecoveryService(repo, users, mailer).(*PasswordRecoveryServiceImpl)
 	service.clock = func() time.Time { return time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC) }
 	service.resetBaseURL = "https://discordia.test/reset-password"
+	service.appResetURL = "https://discordia.test/app-link/reset-password"
 	service.expiration = time.Hour
 	service.recoveryLimit = 3
 	return service
@@ -178,6 +179,45 @@ func TestRecoverPasswordPropagatesMailerError(t *testing.T) {
 	}
 	if repo.created == nil {
 		t.Fatal("token should be persisted before sending the email")
+	}
+}
+
+// Only "app" sends the bridge page; anything else keeps the web link.
+func TestRecoverPasswordUsesTheAppLinkOnlyWhenReturnToIsApp(t *testing.T) {
+	cases := map[string]struct {
+		returnTo string
+		wantBase string
+	}{
+		"app": {model.ReturnToApp, "https://discordia.test/app-link/reset-password?token="},
+		"web": {"web", "https://discordia.test/reset-password?token="},
+		"sin": {"", "https://discordia.test/reset-password?token="},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			users := &userRepositoryStub{existingUser: &model.User{ID: "550e8400-e29b-41d4-a716-446655440007", Email: "ada@example.com"}}
+			mailer := &passwordRecoveryMailerStub{}
+			service := newPasswordRecoveryTestService(&passwordRecoveryRepositoryStub{}, users, mailer)
+
+			err := service.RecoverPassword(context.Background(), model.PasswordRecoveryRequest{
+				Email:    "ada@example.com",
+				ReturnTo: tc.returnTo,
+			})
+
+			if err != nil {
+				t.Fatalf("RecoverPassword() error = %v", err)
+			}
+			if !strings.HasPrefix(mailer.request.ResetURL, tc.wantBase) {
+				t.Fatalf("reset URL = %q, want prefix %q", mailer.request.ResetURL, tc.wantBase)
+			}
+		})
+	}
+}
+
+func TestPasswordResetAppURLCanBeConfigured(t *testing.T) {
+	t.Setenv("PASSWORD_RESET_APP_URL", "https://app.example.com/abrir")
+
+	if got := appResetBaseURL("https://discordia.test/reset-password"); got != "https://app.example.com/abrir" {
+		t.Fatalf("appResetBaseURL() = %q", got)
 	}
 }
 

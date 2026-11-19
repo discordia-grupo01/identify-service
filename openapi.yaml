@@ -1310,6 +1310,17 @@ components:
           format: email
           minLength: 1
           type: string
+        return_to:
+          description: >-
+            "app" cuando lo pide la app mobile: el link del mail pasa por una
+            pagina
+
+            puente de la web que abre la app. Vacio o "web", el link de siempre.
+          enum:
+            - web
+            - app
+          type: string
+          nullable: true
       required:
         - email
       type: object
