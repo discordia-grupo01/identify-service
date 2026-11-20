@@ -12,3 +12,4 @@ storage/
 /.schemathesis/
 
 schemathesis-report/
+__pycache__/

@@ -120,6 +120,46 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ChangePassword godoc
+// @Summary      Change the account's password
+// @Description  Replaces the password of an account that already has one, after checking the current one. Accounts without a password (purely federated Google sign-ups) use POST /v1/me/password instead. On success, every other session of the account is signed out: their refresh tokens are revoked, so each device is logged out once its access token expires (up to 15 minutes). The session that made the change stays open.
+// @Tags         auth
+// @Accept       json
+// @Security     BearerAuth
+// @Param        body  body  model.ChangePasswordRequest  true  "Current and new password"
+// @Success      204  "no content"
+// @Failure      400  {object}  apierr.ErrorResponse  "missing fields, passwords do not match, insecure password, or same as the current one"
+// @Failure      401  {object}  apierr.ErrorResponse
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      409  {object}  apierr.ErrorResponse  "the account has no password yet"
+// @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Router       /v1/me/password [put]
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	var req model.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apierr.InvalidBodyFromBinding(c, "Faltan datos para cambiar la contraseña", err)
+		return
+	}
+
+	err := h.service.ChangePassword(c.Request.Context(), c.GetString(middleware.UserIDKey), c.GetString(middleware.SessionIDKey), req)
+	switch {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, service.ErrPasswordNotSet):
+		apierr.Abort(c, http.StatusConflict, apierr.CodePasswordNotSet, err.Error(), nil)
+	case errors.Is(err, service.ErrPasswordMismatch):
+		apierr.Abort(c, http.StatusForbidden, apierr.CodeInvalidPassword, "La contraseña actual es incorrecta", nil)
+	case errors.Is(err, service.ErrPasswordsDoNotMatch):
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodePasswordsDoNotMatch, "Las contraseñas no coinciden", nil)
+	case errors.Is(err, service.ErrPasswordInsecure):
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodeInsecurePassword, err.Error(), nil)
+	case errors.Is(err, service.ErrSamePassword):
+		apierr.Abort(c, http.StatusBadRequest, apierr.CodeSamePassword, err.Error(), nil)
+	default:
+		apierr.Internal(c)
+	}
+}
+
 // Login godoc
 // @Summary      Log in with email and password
 // @Description  Sets the refresh token as an httpOnly cookie; the response body only carries the access token (refresh_token is zeroed out). If the account has two-factor enabled, the credentials alone are not enough: the request is accepted (202) but not completed, no cookie is set, and the login is finished via POST /v1/login/2fa.

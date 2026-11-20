@@ -12,9 +12,6 @@ type EmailConfirmation struct {
 	CreatedAt time.Time
 }
 
-// ReturnToApp pide que el link del mail abra la app mobile en vez de la web.
-const ReturnToApp = "app"
-
 type EmailConfirmationRequest struct {
 	Email string `json:"email" binding:"required,email" format:"email" minLength:"1"`
 	// "app" cuando lo pide la app mobile: el link del mail pasa por una pagina

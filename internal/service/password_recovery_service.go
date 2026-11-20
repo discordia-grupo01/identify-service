@@ -45,17 +45,20 @@ type PasswordRecoveryServiceImpl struct {
 	userRepo      repository.UserRepository
 	mailer        PasswordRecoveryMailer
 	resetBaseURL  string
+	appResetURL   string
 	expiration    time.Duration
 	recoveryLimit int
 	clock         func() time.Time
 }
 
 func NewPasswordRecoveryService(passRepo repository.PasswordRecoveryRepository, userRepo repository.UserRepository, mailer PasswordRecoveryMailer) PasswordRecoveryService {
+	resetBaseURL := getEnv("PASSWORD_RESET_URL", "http://localhost:3000/reset-password")
 	return &PasswordRecoveryServiceImpl{
 		passRepo:      passRepo,
 		userRepo:      userRepo,
 		mailer:        mailer,
-		resetBaseURL:  getEnv("PASSWORD_RESET_URL", "http://localhost:3000/reset-password"),
+		resetBaseURL:  resetBaseURL,
+		appResetURL:   appResetBaseURL(resetBaseURL),
 		expiration:    recoveryExpiration(),
 		recoveryLimit: recoveryLimit(),
 		clock:         time.Now,
@@ -94,7 +97,11 @@ func (s *PasswordRecoveryServiceImpl) RecoverPassword(ctx context.Context, reque
 		return fmt.Errorf("create password recovery request: %w", err)
 	}
 
-	resetURL, err := buildResetURL(s.resetBaseURL, token)
+	baseURL := s.resetBaseURL
+	if request.ReturnTo == model.ReturnToApp && s.appResetURL != "" {
+		baseURL = s.appResetURL
+	}
+	resetURL, err := buildResetURL(baseURL, token)
 	if err != nil {
 		return fmt.Errorf("build password reset URL: %w", err)
 	}
@@ -144,6 +151,22 @@ func GenerateResetToken() (string, error) {
 func HashResetToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])
+}
+
+// appResetBaseURL es la pagina puente de la web que abre la app con
+// discordia://reset-password?token=... Se puede fijar con
+// PASSWORD_RESET_APP_URL; si no, se arma en el mismo dominio que
+// PASSWORD_RESET_URL. Un link de mail tiene que ser https: el cliente de
+// correo no abre discordia:// directo.
+func appResetBaseURL(resetBaseURL string) string {
+	if configured := getEnv("PASSWORD_RESET_APP_URL", ""); configured != "" {
+		return configured
+	}
+	parsed, err := url.Parse(resetBaseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/app-link/reset-password"
 }
 
 func buildResetURL(baseURL string, token string) (string, error) {
