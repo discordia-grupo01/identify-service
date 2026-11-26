@@ -81,6 +81,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Summary      Set the account's initial password
 // @Description  For an account that never had one (a purely federated Google sign-up): lets it configure a password so it can later re-enter it to disable two-factor or regenerate recovery codes. Rejected if the account already has a password -- this is not a change-password endpoint.
 // @Tags         auth
+// @Produce      json
 // @Accept       json
 // @Security     BearerAuth
 // @Param        body  body  model.SetPasswordRequest  true  "New password"
@@ -124,6 +125,7 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 // @Summary      Change the account's password
 // @Description  Replaces the password of an account that already has one, after checking the current one. Accounts without a password (purely federated Google sign-ups) use POST /v1/me/password instead. On success, every other session of the account is signed out: their refresh tokens are revoked, so each device is logged out once its access token expires (up to 15 minutes). The session that made the change stays open.
 // @Tags         auth
+// @Produce      json
 // @Accept       json
 // @Security     BearerAuth
 // @Param        body  body  model.ChangePasswordRequest  true  "Current and new password"
@@ -225,6 +227,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Summary      Log out
 // @Description  Revokes the refresh token (read from the httpOnly cookie) and clears the cookie.
 // @Tags         auth
+// @Produce      json
 // @Security     BearerAuth
 // @Success      204  "no content"
 // @Failure      401  {object}  apierr.ErrorResponse  "missing/invalid session cookie, or session expired"
