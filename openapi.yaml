@@ -689,7 +689,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.UserResponse"
         "400":
-          description: invalid name/description/image
+          description: invalid name/description/image, or nothing to change
           content:
             application/json:
               schema:

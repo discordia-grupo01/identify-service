@@ -34,6 +34,7 @@ var (
 	ErrInvalidProfileImage       = errors.New("la imagen debe ser JPEG, PNG o WebP, pesar hasta 5 MiB y tener dimensiones válidas")
 	ErrUserNotFound              = errors.New("el usuario no existe")
 	ErrNoStatusChanges           = errors.New("no hay cambios para guardar")
+	ErrNoProfileChanges          = errors.New("no hay cambios para guardar")
 	ErrInvalidStatusText         = errors.New("el texto del estado contiene caracteres de control o supera los 64 caracteres")
 	ErrInvalidStatusEmoji        = errors.New("el emoji del estado contiene caracteres de control o supera los 32 bytes")
 )
@@ -147,7 +148,7 @@ func (s *profileService) Update(ctx context.Context, userID string, request mode
 		return nil, ErrUserNotFound
 	}
 	if request.Name == nil && request.Description == nil && !request.ImageProvided && !request.RemoveImage {
-		return nil, errors.New("no hay cambios para guardar")
+		return nil, ErrNoProfileChanges
 	}
 	if request.ImageProvided && request.RemoveImage {
 		return nil, ErrInvalidProfileImage

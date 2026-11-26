@@ -397,6 +397,7 @@ func TestProfileHandlerMapsServiceErrors(t *testing.T) {
 		wantCode   string
 	}{
 		{name: "invalid profile", err: service.ErrInvalidProfileName, wantStatus: http.StatusBadRequest, wantCode: "INVALID_PROFILE"},
+		{name: "no changes", err: service.ErrNoProfileChanges, wantStatus: http.StatusBadRequest, wantCode: "INVALID_PROFILE"},
 		{name: "missing user", err: service.ErrUserNotFound, wantStatus: http.StatusNotFound, wantCode: "USER_NOT_FOUND"},
 		{name: "unexpected error", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError, wantCode: "INTERNAL_ERROR"},
 	}
