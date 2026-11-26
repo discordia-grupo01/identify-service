@@ -43,7 +43,7 @@ type User struct {
 type RegisterRequest struct {
 	Name     string `json:"name" binding:"required" minLength:"1"`
 	Email    string `json:"email" binding:"required,email" format:"email" minLength:"1"`
-	Password string `json:"password" binding:"required" minLength:"1"`
+	Password string `json:"password" binding:"required" minLength:"1" maxLength:"72"`
 	// Igual que en EmailConfirmationRequest: "app" hace que el mail de alta
 	// abra la app mobile.
 	ReturnTo string `json:"return_to,omitempty" binding:"omitempty,oneof=web app" extensions:"x-nullable"`
@@ -63,19 +63,19 @@ type LoginRequest struct {
 }
 
 type SetPasswordRequest struct {
-	Password string `json:"password" binding:"required" minLength:"1"`
+	Password string `json:"password" binding:"required" minLength:"1" maxLength:"72"`
 }
 
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password" binding:"required" minLength:"1"`
-	NewPassword     string `json:"new_password" binding:"required" minLength:"1"`
-	ConfirmPassword string `json:"confirm_password" binding:"required" minLength:"1"`
+	NewPassword     string `json:"new_password" binding:"required" minLength:"1" maxLength:"72"`
+	ConfirmPassword string `json:"confirm_password" binding:"required" minLength:"1" maxLength:"72"`
 }
 
 type PasswordResetRequest struct {
 	Token           string `json:"token" binding:"required" minLength:"1"`
-	NewPassword     string `json:"new_password" binding:"required" minLength:"1"`
-	ConfirmPassword string `json:"confirm_password" binding:"required" minLength:"1"`
+	NewPassword     string `json:"new_password" binding:"required" minLength:"1" maxLength:"72"`
+	ConfirmPassword string `json:"confirm_password" binding:"required" minLength:"1" maxLength:"72"`
 }
 
 type AuthResponse struct {

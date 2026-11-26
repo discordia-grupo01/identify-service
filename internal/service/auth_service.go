@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	ErrPasswordInsecure      = errors.New("la contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número")
+	ErrPasswordInsecure      = errors.New("la contraseña debe tener entre 8 y 72 caracteres, incluir una mayúscula, una minúscula y un número")
 	ErrEmailInUse            = errors.New("el correo electrónico ya está registrado")
 	ErrInvalidCredentials    = errors.New("correo electrónico o contraseña inválidos")
 	ErrEmailNotVerified      = errors.New("el correo electrónico todavía no fue verificado")
@@ -369,8 +369,10 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string) (*model.
 	return s.issueTokenPair(ctx, user, rt.FamilyID)
 }
 
+const maxPasswordBytes = 72
+
 func validatePassword(password string) bool {
-	if len(password) < 8 {
+	if len(password) < 8 || len(password) > maxPasswordBytes {
 		return false
 	}
 	hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(password)
