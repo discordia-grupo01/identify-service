@@ -108,7 +108,7 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 // @Param        image        formData  file    false  "New profile image (JPEG, PNG or WebP, up to 5 MiB)"
 // @Param        remove_image formData  boolean false  "Remove the current profile image"
 // @Success      200  {object}  model.UserResponse
-// @Failure      400  {object}  apierr.ErrorResponse  "invalid name/description/image"
+// @Failure      400  {object}  apierr.ErrorResponse  "invalid name/description/image, or nothing to change"
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      404  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
@@ -164,7 +164,7 @@ func (h *ProfileHandler) Update(c *gin.Context) {
 	response, err := h.service.Update(c.Request.Context(), userID.(string), request)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidProfileName), errors.Is(err, service.ErrInvalidProfileDescription), errors.Is(err, service.ErrInvalidProfileImage):
+		case errors.Is(err, service.ErrInvalidProfileName), errors.Is(err, service.ErrInvalidProfileDescription), errors.Is(err, service.ErrInvalidProfileImage), errors.Is(err, service.ErrNoProfileChanges):
 			writeProfileInputError(c, err)
 		case errors.Is(err, service.ErrUserNotFound):
 			apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)

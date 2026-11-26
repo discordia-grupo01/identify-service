@@ -125,8 +125,8 @@ func TestProfileServiceNormalizesNameAndDescription(t *testing.T) {
 func TestProfileServiceRejectsNoChanges(t *testing.T) {
 	repo := &userRepositoryStub{existingUser: &model.User{ID: "user-id", Name: "Ada"}}
 	_, err := NewProfileService(repo, &profileImageStorageStub{}, &serverMembershipRepositoryStub{}).Update(context.Background(), "user-id", model.ProfileUpdateRequest{})
-	if err == nil || err.Error() != "no hay cambios para guardar" {
-		t.Fatalf("Update() error = %v, want no changes error", err)
+	if !errors.Is(err, ErrNoProfileChanges) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrNoProfileChanges)
 	}
 }
 
