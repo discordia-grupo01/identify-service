@@ -228,6 +228,7 @@ func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 // DeleteStatus godoc
 // @Summary      Clear my custom status
 // @Tags         profile
+// @Produce      json
 // @Security     BearerAuth
 // @Success      204  "no content"
 // @Failure      401  {object}  apierr.ErrorResponse

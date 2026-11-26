@@ -24,6 +24,7 @@ func NewPinHandler(service service.PinService) *PinHandler {
 // @Summary      Set up a device PIN
 // @Description  Lets the caller log back in on this device with a short PIN instead of the full password.
 // @Tags         auth
+// @Produce      json
 // @Accept       json
 // @Security     BearerAuth
 // @Param        body  body  model.ConfigurePinRequest  true  "Device ID and PIN (6-8 digits)"
