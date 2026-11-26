@@ -305,13 +305,13 @@ paths:
         "401":
           description: missing/invalid session cookie, or session expired
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "500":
           description: unexpected error (INTERNAL_ERROR)
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
@@ -548,25 +548,25 @@ paths:
         "400":
           description: missing password, or insecure password
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: the account already has a password
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "500":
           description: unexpected error (INTERNAL_ERROR)
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
@@ -595,32 +595,32 @@ paths:
           description: missing fields, passwords do not match, insecure password, or same
             as the current one
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: wrong current password -- not 401, so the front doesn't treat it as
             an expired session
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: the account has no password yet
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "500":
           description: unexpected error (INTERNAL_ERROR)
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
@@ -689,7 +689,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.UserResponse"
         "400":
-          description: invalid name/description/image
+          description: invalid name/description/image, or nothing to change
           content:
             application/json:
               schema:
@@ -725,19 +725,19 @@ paths:
         "401":
           description: Unauthorized
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: Not Found
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "500":
           description: unexpected error (INTERNAL_ERROR)
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
@@ -941,19 +941,19 @@ paths:
         "400":
           description: missing fields, or PIN not 6-8 digits
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
           description: Unauthorized
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "500":
           description: unexpected error (INTERNAL_ERROR)
           content:
-            "*/*":
+            application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
       security:
