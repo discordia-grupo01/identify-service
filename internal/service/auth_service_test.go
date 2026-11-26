@@ -319,6 +319,7 @@ func TestAuthServiceRegisterRejectsInsecurePasswords(t *testing.T) {
 		{name: "without uppercase", password: "secure123"},
 		{name: "without lowercase", password: "SECURE123"},
 		{name: "without number", password: "SecurePass"},
+		{name: "longer than bcrypt accepts", password: "Aa1" + strings.Repeat("x", 70)},
 	}
 
 	for _, test := range tests {
@@ -1211,6 +1212,15 @@ func TestAuthServiceRegisterPassesReturnToTheConfirmationEmail(t *testing.T) {
 	want := model.EmailConfirmationRequest{Email: "ada@example.com", ReturnTo: model.ReturnToApp}
 	if len(requester.requests) != 1 || requester.requests[0] != want {
 		t.Fatalf("confirmation requests = %+v, want [%+v]", requester.requests, want)
+	}
+}
+
+func TestValidatePasswordMaximumLength(t *testing.T) {
+	if !validatePassword("Aa1" + strings.Repeat("x", 69)) {
+		t.Error("a password of exactly 72 bytes must be accepted")
+	}
+	if validatePassword("Aa1" + strings.Repeat("x", 70)) {
+		t.Error("a password of 73 bytes must be rejected: bcrypt cannot hash it")
 	}
 }
 
