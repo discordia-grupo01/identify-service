@@ -32,6 +32,7 @@ func NewPinHandler(service service.PinService) *PinHandler {
 // @Failure      400  {object}  apierr.ErrorResponse  "missing fields, or PIN not 6-8 digits"
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/pin [post]
 func (h *PinHandler) Configure(c *gin.Context) {
 	var req model.ConfigurePinRequest

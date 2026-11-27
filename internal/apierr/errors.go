@@ -140,6 +140,8 @@ func ServiceUnavailable(c *gin.Context, message string) {
 // respondan con el sobre en vez del cuerpo vacío o de texto plano de Gin.
 func RegisterFallbacks(router *gin.Engine) {
 	router.HandleMethodNotAllowed = true
+	router.RedirectTrailingSlash = false
+	router.RedirectFixedPath = false
 	router.NoRoute(NotFound)
 	router.NoMethod(MethodNotAllowed)
 }

@@ -28,6 +28,7 @@ func NewTwoFactorHandler(service service.TwoFactorService) *TwoFactorHandler {
 // @Success      200  {object}  model.TwoFactorStatusResponse
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/2fa [get]
 func (h *TwoFactorHandler) Status(c *gin.Context) {
 	status, err := h.service.Status(c.Request.Context(), c.GetString(middleware.UserIDKey))
@@ -47,6 +48,7 @@ func (h *TwoFactorHandler) Status(c *gin.Context) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      409  {object}  apierr.ErrorResponse  "2FA is already enabled on this account, or the account has no password yet"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/2fa/setup [post]
 func (h *TwoFactorHandler) Setup(c *gin.Context) {
 	res, err := h.service.StartSetup(c.Request.Context(), c.GetString(middleware.UserIDKey))
@@ -76,6 +78,7 @@ func (h *TwoFactorHandler) Setup(c *gin.Context) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      409  {object}  apierr.ErrorResponse  "no pending setup, or 2FA is already enabled"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/2fa/activate [post]
 func (h *TwoFactorHandler) Activate(c *gin.Context) {
 	var req model.TwoFactorActivateRequest
@@ -115,7 +118,7 @@ func (h *TwoFactorHandler) Activate(c *gin.Context) {
 // @Success      204  "2FA disabled"
 // @Failure      400  {object}  apierr.ErrorResponse  "missing password"
 // @Failure      401  {object}  apierr.ErrorResponse
-// @Failure      403  {object}  apierr.ErrorResponse  "wrong password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong password -- not 401, so the front doesn't treat it as an expired session; account suspended (ACCOUNT_SUSPENDED)"
 // @Failure      409  {object}  apierr.ErrorResponse  "2FA is not enabled on this account"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/disable [post]
@@ -143,7 +146,7 @@ func (h *TwoFactorHandler) Disable(c *gin.Context) {
 // @Success      200  {object}  model.TwoFactorRecoveryCodesResponse
 // @Failure      400  {object}  apierr.ErrorResponse  "missing password"
 // @Failure      401  {object}  apierr.ErrorResponse
-// @Failure      403  {object}  apierr.ErrorResponse  "wrong password"
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong password; account suspended (ACCOUNT_SUSPENDED)"
 // @Failure      409  {object}  apierr.ErrorResponse  "2FA is not enabled on this account"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/2fa/recovery-codes [post]

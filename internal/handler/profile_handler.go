@@ -35,6 +35,7 @@ func NewProfileHandler(profileService service.ProfileService) *ProfileHandler {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      404  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/profile [get]
 func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
@@ -62,7 +63,7 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 // @Tags         profile
 // @Produce      json
 // @Security     BearerAuth
-// @Param        id  path  string  true  "Target user's ID"
+// @Param        id  path  string  true  "Target user's ID"  Format(uuid)
 // @Success      200  {object}  model.PublicUserResponse
 // @Failure      400  {object}  apierr.ErrorResponse  "invalid user id"
 // @Failure      401  {object}  apierr.ErrorResponse
@@ -112,6 +113,7 @@ func (h *ProfileHandler) GetPublicProfile(c *gin.Context) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      404  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/profile [patch]
 func (h *ProfileHandler) Update(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
@@ -195,6 +197,7 @@ func writeProfileInputError(c *gin.Context, err error) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      404  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/status [put]
 func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
@@ -234,6 +237,7 @@ func (h *ProfileHandler) UpdateStatus(c *gin.Context) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      404  {object}  apierr.ErrorResponse
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/status [delete]
 func (h *ProfileHandler) DeleteStatus(c *gin.Context) {
 	userID, exists := c.Get(middleware.UserIDKey)
