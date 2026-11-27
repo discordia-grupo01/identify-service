@@ -90,6 +90,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Failure      401  {object}  apierr.ErrorResponse
 // @Failure      409  {object}  apierr.ErrorResponse  "the account already has a password"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/me/password [post]
 func (h *AuthHandler) SetPassword(c *gin.Context) {
 	var req model.SetPasswordRequest
@@ -132,7 +133,7 @@ func (h *AuthHandler) SetPassword(c *gin.Context) {
 // @Success      204  "no content"
 // @Failure      400  {object}  apierr.ErrorResponse  "missing fields, passwords do not match, insecure password, or same as the current one"
 // @Failure      401  {object}  apierr.ErrorResponse
-// @Failure      403  {object}  apierr.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session"
+// @Failure      403  {object}  apierr.ErrorResponse  "wrong current password -- not 401, so the front doesn't treat it as an expired session; account suspended (ACCOUNT_SUSPENDED)"
 // @Failure      409  {object}  apierr.ErrorResponse  "the account has no password yet"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
 // @Router       /v1/me/password [put]
@@ -232,6 +233,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Success      204  "no content"
 // @Failure      401  {object}  apierr.ErrorResponse  "missing/invalid session cookie, or session expired"
 // @Failure      500  {object}  apierr.ErrorResponse  "unexpected error (INTERNAL_ERROR)"
+// @Failure      403  {object}  apierr.ErrorResponse  "account suspended (ACCOUNT_SUSPENDED)"
 // @Router       /v1/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	refreshToken, err := c.Cookie(refreshCookieName)

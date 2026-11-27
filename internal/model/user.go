@@ -46,7 +46,7 @@ type RegisterRequest struct {
 	Password string `json:"password" binding:"required" minLength:"1" maxLength:"72"`
 	// Igual que en EmailConfirmationRequest: "app" hace que el mail de alta
 	// abra la app mobile.
-	ReturnTo string `json:"return_to,omitempty" binding:"omitempty,oneof=web app" extensions:"x-nullable"`
+	ReturnTo string `json:"return_to,omitempty" binding:"omitempty,oneof=web app" enums:"web,app," extensions:"x-nullable"`
 }
 
 type EmailConfirmationTokenRequest struct {
